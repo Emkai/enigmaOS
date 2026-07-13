@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_NAME="$(basename "${CLAUDE_PROJECT_DIR:-.}")"
+
+# Resolve tmux target from process ancestry
+declare -A pane_map
+while IFS=' ' read -r ppid coords; do
+    pane_map["$ppid"]="$coords"
+done < <(tmux list-panes -a -F '#{pane_pid} #{session_name}:#{window_index}.#{pane_index}' 2>/dev/null)
+
+TMUX_TARGET=""
+pid=$$
+while [[ -n "$pid" && "$pid" != "1" ]]; do
+    if [[ -n "${pane_map[$pid]:-}" ]]; then
+        TMUX_TARGET="${pane_map[$pid]}"
+        break
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+done
+
+# Send notification in background (notify-send -A blocks until click/dismiss)
+(
+    if [[ -n "$TMUX_TARGET" ]]; then
+        action=$(notify-send -u critical \
+            -A "switch=Switch to $TMUX_TARGET" \
+            "Claude Code" \
+            "$PROJECT_NAME needs your attention" 2>/dev/null) || true
+
+        if [[ "$action" == "switch" ]]; then
+            tmux switch-client -t "$TMUX_TARGET" 2>/dev/null || true
+            hyprctl dispatch focuswindow kitty 2>/dev/null || true
+        fi
+    else
+        # Fallback: not in tmux, plain notification
+        notify-send -u critical "Claude Code" "$PROJECT_NAME needs your attention"
+    fi
+) &
+disown

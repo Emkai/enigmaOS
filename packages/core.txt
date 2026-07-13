@@ -1,0 +1,81 @@
+# Core Hyprland desktop — every machine gets these.
+
+# Base system
+base
+base-devel
+linux
+linux-firmware
+linux-headers
+efibootmgr
+zram-generator
+man-db
+
+# Hyprland desktop
+hyprland
+hyprlock
+hyprshot
+uwsm
+waybar
+wofi
+dunst
+sddm
+grim
+slurp
+nwg-look
+xorg-server
+xorg-xinit
+wayland-utils
+xdg-desktop-portal-gtk
+xdg-desktop-portal-hyprland
+xdg-utils
+qt5-wayland
+qt6-wayland
+polkit-kde-agent
+ttf-cascadia-mono-nerd
+ttf-roboto
+
+# Audio
+pipewire
+pipewire-alsa
+pipewire-jack
+pipewire-libcamera
+pipewire-pulse
+wireplumber
+pavucontrol
+sof-firmware
+libpulse
+
+# Networking / bluetooth
+networkmanager
+network-manager-applet
+iwd
+wpa_supplicant
+wireless_tools
+systemd-resolvconf
+bluez
+bluez-utils
+blueman
+wireguard-tools
+tailscale
+freerdp
+brightnessctl
+
+# Terminal / editor / apps used by hypr programs.conf and keybinds
+kitty
+dolphin
+chromium
+neovim
+tmux
+vim
+nano
+htop
+unzip
+wget
+git
+github-cli
+stow
+openssh
+
+# Power/hardware management
+bolt
+powertop

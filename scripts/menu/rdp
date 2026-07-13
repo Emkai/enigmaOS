@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/../src/rdp.sh"
+
+# Launcher used to start a connection in its own (detached) session.
+RDP_BIN="$SCRIPT_DIR/../rdp"
+
+# Acquire the password (decrypt the stored one, or prompt with a masked wofi
+# field) and launch xfreerdp3 detached so the menu can close. The password is
+# handed to the launcher via the environment (owner-only /proc/<pid>/environ),
+# never on the command line. Returns non-zero if the user cancels the prompt.
+rdp_menu_connect() {
+    local name="$1" enc pw
+    enc="$(rdp_get "$name" password)"
+    if [[ -n "$enc" ]]; then
+        pw="$(printf '%s' "$enc" | rdp_decrypt)"
+    else
+        pw="$(wofi -d -P -k /dev/null --style "$STYLES_FILE" -p "Password for $name" -L 0 < /dev/null)"
+        [[ -z "$pw" ]] && return 1
+    fi
+    setsid -f env RDP_PASSWORD="$pw" "$RDP_BIN" -e "$name" >/dev/null 2>&1
+    return 0
+}
+
+# Per-connection actions: Connect or Remove.
+rdp_connection_submenu() {
+    local name="$1"
+    local connect_label="Connect"
+    local remove_label="Remove"
+    local server domain user info confirm
+    server="$(rdp_get "$name" server)"
+    domain="$(rdp_get "$name" domain)"
+    user="$(rdp_get "$name" user)"
+
+    info="$user@$server"
+    [[ -n "$domain" ]] && info="$info  [$domain]"
+
+    while true; do
+        options="$info\n$divider\n$connect_label\n$remove_label\n$divider\n$goback\n$doexit"
+        chosen="$(wofi_menu "$name" "$options")"
+
+        case $chosen in
+            $connect_label)
+                if rdp_menu_connect "$name"; then
+                    echo "$doexit"
+                    return 0
+                fi
+                ;;
+            $remove_label)
+                confirm="$(wofi_menu "Remove '$name'?" "No\nYes" 2)"
+                if [[ "$confirm" == "Yes" ]]; then
+                    RDP_YES=1 rdp_remove "$name" >/dev/null 2>&1
+                    echo "$goback"
+                    return 0
+                fi
+                ;;
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+# Top-level RDP menu: list stored connections, then per-connection actions.
+# New/edit live in the CLI (`rdp -n`, `rdp -E`) since they need field entry.
+rdp_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    local max_lines=24
+    while true; do
+        conn_list=""
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            server="$(rdp_get "$name" server)"
+            user="$(rdp_get "$name" user)"
+            conn_list="$conn_list$name  •  $user@$server\n"
+        done < <(rdp_names)
+
+        [[ -z "$conn_list" ]] && conn_list="(no connections)\n"
+        options="${conn_list}$sub_options"
+        chosen="$(max_lines=$max_lines wofi_menu "RDP" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "(no connections)")
+                ;;
+            *)
+                name=$(echo "$chosen" | sed 's/  •.*//')
+                if [[ -n "$name" ]]; then
+                    ret=$(rdp_connection_submenu "$name")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}

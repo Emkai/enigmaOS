@@ -1,0 +1,3 @@
+intel-media-driver
+libva-intel-driver
+vulkan-intel

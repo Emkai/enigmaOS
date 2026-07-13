@@ -1,0 +1,148 @@
+* {
+    font-family: "CaskaydiaMono Nerd Font";
+    font-size: 15px;
+        font-weight: bold;
+}
+
+#waybar {
+    background-color: transparent;
+    color: #ffffff;
+    margin: 0px;
+}
+
+button {
+    box-shadow: inset 0 -2px transparent;
+    border: none;
+    border-radius: 5;
+    padding: 0 0px;
+    margin: 2 2px;
+}
+
+
+#workspaces button {
+    /*background-color: #5f676a;*/
+    color: #ffffff;
+}
+
+#workspaces button:hover {
+    background: rgba(0,0,0,0.2);
+}
+
+#workspaces button.urgent {
+    background-color: #900000;
+}
+
+#workspaces button.active {
+    background-color: #285577;
+}
+
+#window,
+#workspaces {
+    margin: 0 5px;
+}
+
+.modules-left > widget > *,
+.modules-right > widget > * {
+    margin: 0 5px;
+}
+
+.modules-left{}
+
+.modules-right{} 
+
+.modules-center{}
+
+.modules-left > widget:first-child > #workspaces {
+    margin-left: 0;
+}
+
+
+.modules-right > widget:last-child > #workspaces {
+    margin-right: 0;
+}
+
+@keyframes blink {
+    to {
+        color: #000000;
+    }
+}
+
+#battery.critical:not(.charging) {
+    color: #f53c3c;
+    animation-name: blink;
+    animation-duration: 0.5s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+
+label:focus {
+    background-color: #000000;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: #eb4d4b;
+}
+
+#custom-spacer {
+    min-width: 40px;
+}
+
+#cpu {
+    min-width: 50px;
+    margin-right: 60px;
+}
+
+#memory {
+    min-width: 70px;
+    margin-left: 60px;
+}
+
+#network {
+    min-width: 240px;
+}
+
+#custom-ping {
+    min-width: 60px;
+}
+
+/* Ping indicator */
+
+#custom-ping.stale {
+    color: #ffcc00;
+}
+
+#custom-ping.offline {
+    color: #ff0000;
+}
+
+/* Recording indicator */
+#custom-recording {
+  color: #ff0000;
+  font-size: 16px;
+  margin-right: 8px;
+  animation: blink 1s linear infinite;
+}
+
+#custom-network {
+  margin-right: 8px;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 1; }
+  51% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+#custom-testing-tooltip {
+    color: #ff0000;
+    font-size: 16px;
+    margin-right: 8px;
+    animation: blink 1s linear infinite;
+}

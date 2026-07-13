@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/wofi"
+
+# Constants
+power_menu="Power menu"
+lock="Lock"
+reboot="Reboot"
+shutdown="Shutdown"
+
+power_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s | --sub-command)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        options="$lock\n$reboot\n$shutdown\n$sub_options"
+        chosen="$(wofi_menu "$power_menu" "$options")"
+
+        case $chosen in
+            $lock)
+                ret=$(hyprlock)
+                echo "$doexit"
+                return 0
+                ;;
+            $reboot)
+                systemctl reboot
+                echo "$doexit"
+                return 0
+                ;;
+            $shutdown)
+                systemctl poweroff
+                echo "$doexit"
+                return 0
+                ;;
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+        esac
+    done
+}

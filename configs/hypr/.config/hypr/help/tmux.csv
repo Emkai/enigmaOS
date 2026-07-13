@@ -1,0 +1,15 @@
+CTRL+B D;tmux detach from session
+CTRL+B $;tmux rename current session
+CTRL+B S;tmux list all sessions
+CTRL+B (;tmux move to previus session
+CTRL+B );tmux move to next session
+"tmux a";Attach to last session
+"tmux a -t sn";Attach to session named sn
+CTRL+B W;tmux window preview
+CTRL+B C;tmux create new window
+CTRL+B ,;tmux rename current window
+CTRL+B &;tmux close current window
+CTRL+B p;tmux move to previus window
+CTRL+B n;tmux move to next window
+CTRL+B X;tmux close current pane
+CTRL+B "0 .. 9";tmux select window

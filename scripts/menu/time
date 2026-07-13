@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/../src/time.sh"
+
+# Constants
+add_time_label="Add time"
+recent_entries_label="Recent entries"
+generate_report_label="Generate report"
+generate_invoice_label="Generate invoice"
+max_lines=16
+
+time_add_menu() {
+    while true; do
+        # Build task list
+        local tasks
+        tasks=$(cmpy_task_list)
+
+        if [[ -z "$tasks" ]]; then
+            notify-send "Time" "No tasks found"
+            return 0
+        fi
+
+        # Show only display labels (strip index prefix)
+        local task_options
+        task_options=$(echo "$tasks" | cut -f2)
+        task_options="$task_options\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(wofi_menu "Select task" "$task_options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            *)
+                # Find the index for the selected task
+                local task_index
+                task_index=$(echo "$tasks" | grep -F "$chosen" | head -1 | cut -f1)
+
+                if [[ -z "$task_index" ]]; then
+                    continue
+                fi
+
+                # Prompt for hours
+                local hours
+                hours=$(wofi_menu "Hours" "" 1 </dev/null)
+
+                if [[ -z "$hours" ]]; then
+                    continue
+                fi
+
+                # Validate hours is a positive number
+                if ! [[ "$hours" =~ ^[0-9]+\.?[0-9]*$ ]] || [[ "$hours" == "0" ]]; then
+                    notify-send "Time" "Invalid hours: $hours"
+                    continue
+                fi
+
+                # Prompt for date (default today)
+                local today
+                today=$(date +%Y-%m-%d)
+                local date
+                date=$(wofi_menu "Date (default: $today)" "" 1 </dev/null)
+
+                if [[ -z "$date" ]]; then
+                    date="$today"
+                fi
+
+                # Validate date format
+                if ! [[ "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                    notify-send "Time" "Invalid date: $date"
+                    continue
+                fi
+
+                cmpy_add_time "$task_index" "$hours" "$date"
+                return 0
+                ;;
+        esac
+    done
+}
+
+time_recent_menu() {
+    local entries
+    entries=$(cmpy_recent_entries 20)
+
+    if [[ -z "$entries" ]]; then
+        entries="(no entries)"
+    fi
+
+    local options="$entries\n$divider\n$goback\n$doexit"
+    local chosen
+    chosen="$(wofi_menu "Recent time entries" "$options")"
+
+    case $chosen in
+        $goback)
+            echo "$goback"
+            return 0
+            ;;
+        *)
+            echo "$doexit"
+            return 0
+            ;;
+    esac
+}
+
+time_report_menu() {
+    local current_month
+    current_month=$(date +%Y-%m)
+
+    local month
+    month=$(wofi_menu "Month (default: $current_month)" "" 1 </dev/null)
+
+    if [[ -z "$month" ]]; then
+        month="$current_month"
+    fi
+
+    if ! [[ "$month" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
+        notify-send "Time" "Invalid month: $month"
+        return 0
+    fi
+
+    local out="$HOME/Documents/work/au/report-${month}.pdf"
+    cmpy_generate_report "$month" "$out"
+    chromium "$out"
+}
+
+time_invoice_menu() {
+    local current_month
+    current_month=$(date +%Y-%m)
+
+    local month
+    month=$(wofi_menu "Month (default: $current_month)" "" 1 </dev/null)
+
+    if [[ -z "$month" ]]; then
+        month="$current_month"
+    fi
+
+    if ! [[ "$month" =~ ^[0-9]{4}-[0-9]{2}$ ]]; then
+        notify-send "Time" "Invalid month: $month"
+        return 0
+    fi
+
+    # Show client list
+    local clients
+    clients=$(cmpy_client_list)
+
+    if [[ -z "$clients" ]]; then
+        notify-send "Time" "No clients found"
+        return 0
+    fi
+
+    local client_options
+    client_options=$(echo "$clients" | cut -f2)
+    client_options="$client_options\n$divider\n$goback\n$doexit"
+
+    local chosen
+    chosen="$(wofi_menu "Select client" "$client_options")"
+
+    case $chosen in
+        $divider | $goback | "" | $doexit)
+            return 0
+            ;;
+        *)
+            local client_index
+            client_index=$(echo "$clients" | grep -F "$chosen" | head -1 | cut -f1)
+
+            if [[ -z "$client_index" ]]; then
+                return 0
+            fi
+
+            local out="$HOME/Documents/work/au/invoice-${month}.pdf"
+            cmpy_generate_invoice "$month" "$client_index" "$out"
+            chromium "$out"
+            ;;
+    esac
+}
+
+time_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s | --sub-command)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        local today_hours
+        today_hours=$(cmpy_today_hours)
+        local month_hours
+        month_hours=$(cmpy_month_hours)
+        local today_label="Today: ${today_hours}h"
+        local month_label="Month: ${month_hours}h"
+        local ret=""
+
+        options="$add_time_label\n$today_label\n$month_label\n$recent_entries_label\n$generate_report_label\n$generate_invoice_label\n$sub_options"
+        chosen="$(wofi_menu "Time" "$options")"
+
+        case $chosen in
+            $add_time_label)
+                ret=$(time_add_menu)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            "$today_label" | "$month_label")
+                # Info-only lines, do nothing
+                ;;
+            $recent_entries_label)
+                ret=$(time_recent_menu)
+               ;;
+            $generate_report_label)
+                ret=$(time_report_menu)
+                ;;
+            $generate_invoice_label)
+                ret=$(time_invoice_menu)
+                ;;
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+        esac
+        case $ret in
+            $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+        esac
+    done
+}

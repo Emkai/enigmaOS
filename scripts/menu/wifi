@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+
+# Constants
+network_menu="List: networks"
+max_lines=16
+
+
+wifi_power_on() {
+    if nmcli radio wifi | grep -q "enabled"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Toggles power state
+wifi_toggle_power() {
+    if wifi_power_on; then
+        nmcli radio wifi off
+        echo "Power: off"
+        return 0
+    else
+        nmcli radio wifi on
+        echo "Power: on"
+        return 0
+    fi
+}
+
+# Get current connection
+wifi_get_current() {
+    nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2
+}
+
+# Check if connected to a network
+wifi_connected() {
+    current=$(wifi_get_current)
+    if [[ -n "$current" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Disconnect from current network
+wifi_disconnect() {
+    nmcli dev disconnect wlan0 2>/dev/null || nmcli dev disconnect wifi 2>/dev/null
+    echo "Disconnected"
+}
+
+# Get signal strength icon
+wifi_signal_icon() {
+    signal=$1
+    if (( signal >= 75 )); then
+        echo "▂▄▆█"
+    elif (( signal >= 50 )); then
+        echo "▂▄▆_"
+    elif (( signal >= 25 )); then
+        echo "▂▄__"
+    else
+        echo "▂___"
+    fi
+}
+
+# Connect to a network
+wifi_connect() {
+    ssid="$1"
+    
+    # Check if we have a saved connection for this network
+    if nmcli -t -f name connection show | grep -qx "$ssid"; then
+        nmcli connection up "$ssid"
+        return $?
+    fi
+    
+    # Check if network requires password
+    security=$(nmcli -t -f ssid,security dev wifi list | grep "^${ssid}:" | cut -d':' -f2)
+    
+    if [[ -z "$security" || "$security" == "--" ]]; then
+        # Open network
+        nmcli dev wifi connect "$ssid"
+        return $?
+    else
+        # Need password - prompt user
+        password=$(wofi_menu "Password for $ssid" "" 1 </dev/null)
+        if [[ -n "$password" ]]; then
+            nmcli dev wifi connect "$ssid" password "$password"
+            return $?
+        else
+            return 1
+        fi
+    fi
+}
+
+# Rescan for networks
+wifi_rescan() {
+    nmcli dev wifi rescan 2>/dev/null
+    sleep 1
+}
+
+# A submenu for a specific network
+wifi_network_menu() {
+    ssid="$1"
+    current=$(wifi_get_current)
+    
+    # Build options
+    if [[ "$ssid" == "$current" ]]; then
+        connected="Connected: yes"
+        conn_action="Disconnect"
+    else
+        connected="Connected: no"
+        conn_action="Connect"
+    fi
+    
+    # Check if we have saved credentials
+    if nmcli -t -f name connection show | grep -qx "$ssid"; then
+        saved="Saved: yes"
+        forget_option="Forget network"
+    else
+        saved="Saved: no"
+        forget_option=""
+    fi
+    
+    if [[ -n "$forget_option" ]]; then
+        options="$connected\n$conn_action\n$saved\n$forget_option\n$divider\n$goback\n$doexit"
+    else
+        options="$connected\n$conn_action\n$saved\n$divider\n$goback\n$doexit"
+    fi
+
+    chosen="$(wofi_menu "$ssid" "$options")"
+
+    # Match chosen option to command
+    case $chosen in
+        $divider)
+            ;;
+        "Connect")
+            ret=$(wifi_connect "$ssid")
+            if [[ $? -eq 0 ]]; then
+                echo "$doexit"
+                return 0
+            fi
+            ;;
+        "Disconnect")
+            ret=$(wifi_disconnect)
+            if [[ $? -eq 0 ]]; then
+                echo "$doexit"
+                return 0
+            fi
+
+            ;;
+        "Forget network")
+            nmcli connection delete "$ssid"
+            ;;
+        $goback)
+            echo "$goback"
+            return 0
+            ;;
+        "" | $doexit)
+            echo "$doexit"
+            return 0
+            ;;
+    esac
+}
+
+wifi_networks_menu() {
+    while true; do
+        # Get list of available networks with signal strength
+        networks=""
+        while IFS=: read -r ssid signal security; do
+            if [[ -n "$ssid" ]]; then
+                icon=$(wifi_signal_icon "$signal")
+                if [[ -n "$security" && "$security" != "--" ]]; then
+                    networks="$networks$icon  $ssid\n"
+                else
+                    networks="$networks$icon  $ssid (open)\n"
+                fi
+            fi
+        done < <(nmcli -t -f ssid,signal,security dev wifi list | sort -t: -k2 -rn | uniq)
+        
+        options="${networks}$divider\n$goback\n$doexit"
+
+        chosen="$(wofi_menu "WiFi networks" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            "$goback")
+                echo "$goback"
+                return 0
+                ;;
+            *)
+                # Extract SSID from selection (remove signal icon and open marker)
+                ssid=$(echo "$chosen" | sed 's/^[▂▄▆█_ ]*//;s/ (open)$//')
+                if [[ -n "$ssid" ]]; then 
+                    ret=$(wifi_network_menu "$ssid")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}
+
+wifi_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+    while true; do
+        
+        if wifi_power_on; then
+            power="Power: on"
+            
+            # Show current connection if any
+            current=$(wifi_get_current)
+            if [[ -n "$current" ]]; then
+                current_status="Connected: $current"
+            else
+                current_status="Connected: none"
+            fi
+            
+            rescan="Rescan"
+            options="$power\n$current_status\n$network_menu\n$rescan\n$sub_options"
+        else
+            power="Power: off"
+            options="$power\n$sub_options"
+        fi
+
+        chosen="$(wofi_menu "WiFi" "$options" )"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            $power)
+                ret=$(wifi_toggle_power) 
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            "$current_status")
+                if [[ -n "$current" ]]; then
+                    ret=$(wifi_network_menu "$current")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+            $network_menu)
+                ret=$(wifi_networks_menu) 
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            "$rescan")
+                wifi_rescan
+                ;;
+            *)
+                # Check if it's a network from the list
+                ssid=$(echo "$chosen" | sed 's/^[▂▄▆█_ ]*//;s/ (open)$//')
+                if nmcli -t -f ssid dev wifi list | grep -qx "$ssid"; then 
+                    ret=$(wifi_network_menu "$ssid") 
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}

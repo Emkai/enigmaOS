@@ -1,0 +1,19 @@
+[global]
+follow = mouse
+separator_color= frame
+highlight = "#8caaee"
+
+[urgency_low]
+frame_color = "#33ccff"
+background = "#1b1b1b"
+foreground = "#c6d0f5"
+
+[urgency_normal]
+frame_color = "#ef9f76"
+background = "#1b1b1b"
+foreground = "#c6d0f5"
+
+[urgency_critical]
+background = "#1b1b1b"
+foreground = "#c6d0f5"
+frame_color = "#a63229"

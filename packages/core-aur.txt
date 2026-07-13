@@ -1,0 +1,11 @@
+# Core AUR packages — backs SDDM/GTK theming, screen recording keybind,
+# and the vpn/wireguard menu + waybar status modules used unconditionally.
+
+hyprdynamicmonitors-bin
+sddm-silent-theme
+sddm-theme-tokyo-night-git
+tokyonight-gtk-theme-git
+wl-screenrec
+tlp-git
+wireguard-go-git
+openvpn3

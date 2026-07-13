@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/bluetooth"
+source "$SCRIPT_DIR/wifi"
+source "$SCRIPT_DIR/power"
+source "$SCRIPT_DIR/vpn"
+source "$SCRIPT_DIR/time"
+source "$SCRIPT_DIR/rdp"
+
+# Constants
+power_menu="Power menu"
+bluetooth_menu="Bluetooth menu"
+wifi_menu="WiFi menu"
+vpn_menu_label="VPN menu"
+time_menu_label="Time menu"
+rdp_menu_label="RDP menu"
+
+main_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s | --sub-command)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        options="$power_menu\n$bluetooth_menu\n$wifi_menu\n$vpn_menu_label\n$rdp_menu_label\n$time_menu_label\n$sub_options"
+        chosen="$(wofi_menu "menu" "$options")"
+
+        case $chosen in
+            $power_menu)
+                ret=$(power_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $bluetooth_menu)
+                ret=$(bluetooth_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $wifi_menu)
+                ret=$(wifi_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $vpn_menu_label)
+                ret=$(vpn_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $rdp_menu_label)
+                ret=$(rdp_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $time_menu_label)
+                ret=$(time_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $divider)
+                ;;
+             $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+        esac
+    done
+}

@@ -1,0 +1,434 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/../src/vpn.sh"
+
+# Menu labels (status is appended dynamically)
+wireguard_label="WireGuard"
+openvpn_label="OpenVPN"
+tailscale_label="Tailscale"
+tailscale_devices_menu_label="List: devices"
+tailscale_connect_label="Connect"
+tailscale_disconnect_label="Disconnect"
+tailscale_start_service_label="Start tailscaled service"
+tailscale_stop_service_label="Stop tailscaled service"
+
+wireguard_config_submenu() {
+    local iface="$1"
+    local connect_label="Connect"
+    local disconnect_label="Disconnect"
+    local rename_label="Rename"
+
+    while true; do
+        # Recompute each iteration so a rename is reflected immediately.
+        local name
+        name="$(wireguard_display_name "$iface")"
+        if wireguard_interface_connected "$iface"; then
+            action_option="$disconnect_label"
+        else
+            action_option="$connect_label"
+        fi
+        options="$action_option\n$rename_label\n$divider\n$goback\n$doexit"
+        chosen="$(wofi_menu "WireGuard: $name" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $connect_label)
+                if wireguard_connect "$iface"; then
+                    echo "$doexit"
+                    return 0
+                fi
+                ;;
+            $disconnect_label)
+                wireguard_disconnect "$iface"
+                ;;
+            $rename_label)
+                # Free-text entry: prefill the current name as the single row;
+                # wofi (dmenu, no require-match) returns whatever is typed on Enter.
+                local new
+                new=$(printf '%s' "$name" | wofi_menu "New name for $iface" "$name")
+                if [[ -n "$new" && "$new" != "$goback" && "$new" != "$doexit" && "$new" != "$divider" ]]; then
+                    wireguard_set_name "$iface" "$new"
+                fi
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+wireguard_menu() {
+    local max_lines=24
+    wireguard_names_init
+    while true; do
+        configs_list=""
+        while IFS= read -r iface; do
+            [[ -z "$iface" ]] && continue
+            name="$(wireguard_display_name "$iface")"
+            if wireguard_interface_connected "$iface"; then
+                configs_list="$configs_list$name  • Connected\n"
+            else
+                configs_list="$configs_list$name  • Disconnected\n"
+            fi
+        done < <(wireguard_configs_list)
+
+        [[ -z "$configs_list" ]] && configs_list="(no configs)\n"
+        options="${configs_list}$divider\n$goback\n$doexit"
+        chosen="$(max_lines=$max_lines wofi_menu "WireGuard configs" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "(no configs)")
+                ;;
+            *)
+                name=$(echo "$chosen" | sed 's/  •.*//')
+                iface=$(wireguard_iface_from_display "$name")
+                if [[ -n "$iface" ]]; then
+                    ret=$(wireguard_config_submenu "$iface")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}
+
+# Submenu for a single Tailscale device (hostname, IP, status)
+tailscale_device_submenu() {
+    local hostname=$1
+    local ip=$2
+    local status=$3
+
+    while true; do
+        if [[ "$status" == "-" ]]; then
+            status_text="Connected: yes"
+        elif [[ "$status" == active* ]]; then
+            status_text="Connected: yes (active)"
+        elif [[ "$status" == idle* ]]; then
+            status_text="Connected: yes (idle)"
+        else
+            status_text="Connected: no ($status)"
+        fi
+        options="$status_text\nIP: $ip\n$divider\n$goback\n$doexit"
+        chosen="$(wofi_menu "$hostname" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+# OpenVPN3: submenu for one config — Connect or Disconnect
+openvpn_config_submenu() {
+    local config_name="$1"
+    local connect_label="Connect"
+    local disconnect_label="Disconnect"
+
+    while true; do
+        if openvpn3_config_connected "$config_name"; then
+            action_option="$disconnect_label"
+        else
+            action_option="$connect_label"
+        fi
+        options="$action_option\n$divider\n$goback\n$doexit"
+        chosen="$(wofi_menu "OpenVPN: $config_name" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $connect_label)
+                if openvpn3_connect "$config_name"; then
+                    echo "$doexit"
+                    return 0
+                fi
+                ;;
+            $disconnect_label)
+                openvpn3_disconnect "$config_name"
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+# OpenVPN3: list configs, then per-config Connect/Disconnect
+openvpn_menu() {
+    local max_lines=24
+    while true; do
+        configs_list=""
+        while IFS= read -r name; do
+            [[ -z "$name" ]] && continue
+            if openvpn3_config_connected "$name"; then
+                configs_list="$configs_list$name  • Connected\n"
+            else
+                configs_list="$configs_list$name  • Disconnected\n"
+            fi
+        done < <(openvpn3_configs_list)
+
+        [[ -z "$configs_list" ]] && configs_list="(no configs)\n"
+        options="${configs_list}$divider\n$goback\n$doexit"
+        chosen="$(max_lines=$max_lines wofi_menu "OpenVPN configs" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "(no configs)")
+                ;;
+            *)
+                config_name=$(echo "$chosen" | sed 's/  •.*//')
+                if [[ -n "$config_name" ]]; then
+                    ret=$(openvpn_config_submenu "$config_name")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}
+
+tailscale_devices_menu() {
+    local max_lines=24
+    while true; do
+        devices_list=""
+        while IFS=$'\t' read -r _ hostname _ status; do
+            if [[ "$status" == "-" ]]; then
+                devices_list="$devices_list$hostname  -\n"
+            elif [[ "$status" == active* ]]; then
+                devices_list="$devices_list$hostname  active\n"
+            elif [[ "$status" == idle* ]]; then
+                devices_list="$devices_list$hostname  idle\n"
+            else
+                devices_list="$devices_list$hostname  $status\n"
+            fi
+        done < <(tailscale_sorted_devices)
+
+        [[ -z "$devices_list" ]] && devices_list="(no devices)\n"
+        options="${devices_list}$divider\n$goback\n$doexit"
+        chosen="$(max_lines=$max_lines wofi_menu "Tailscale devices" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "(no devices)")
+                ;;
+            *)
+                # Find device line: chosen is "hostname  status"
+                hostname=$(echo "$chosen" | sed 's/  .*//')
+                line=$(tailscale_sorted_devices | awk -F'\t' -v h="$hostname" '$2==h {print; exit}')
+                if [[ -n "$line" ]]; then
+                    ip=$(echo "$line" | cut -f3)
+                    status=$(echo "$line" | cut -f4-)
+                    ret=$(tailscale_device_submenu "$hostname" "$ip" "$status")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}
+
+tailscale_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        if ! tailscaled_service_running; then
+            options="$tailscale_start_service_label"
+        else
+            options="$tailscale_stop_service_label"
+        fi
+        if tailscaled_service_running; then
+            options="$options\n$tailscale_devices_menu_label"
+            if tailscale_connected; then
+                options="$options\n$tailscale_disconnect_label"
+            else
+                options="$options\n$tailscale_connect_label"
+            fi
+        fi
+        options="$options\n$sub_options"
+        chosen="$(wofi_menu "Tailscale" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            $tailscale_devices_menu_label)
+                ret=$(tailscale_devices_menu)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $tailscale_connect_label)
+                if tailscale_up 2>/dev/null; then
+                    echo "$doexit"
+                    return 0
+                fi
+                ;;
+            $tailscale_disconnect_label)
+                tailscale_down 2>/dev/null
+                ;;
+            $tailscale_start_service_label)
+                tailscale_start_service 2>/dev/null
+                ;;
+            $tailscale_stop_service_label)
+                tailscale_stop_service 2>/dev/null
+                ;;
+        esac
+    done
+}
+
+vpn_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        if wireguard_connected; then
+            wireguard_option="$wireguard_label: Connected"
+        else
+            wireguard_option="$wireguard_label: Disconnected"
+        fi
+        openvpn_option="$openvpn_label"
+        if tailscaled_service_running; then
+            if tailscale_connected; then
+                tailscale_option="$tailscale_label: Connected"
+            else
+                tailscale_option="$tailscale_label: Disconnected"
+            fi
+        else 
+            tailscale_option="$tailscale_label: Disabled"
+        fi
+
+        options="$tailscale_option\n$wireguard_option\n$openvpn_option\n$sub_options"
+        chosen="$(wofi_menu "VPN" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            $wireguard_option)
+                ret=$(wireguard_menu)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $openvpn_option)
+                ret=$(openvpn_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $tailscale_option)
+                ret=$(tailscale_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+        esac
+    done
+}

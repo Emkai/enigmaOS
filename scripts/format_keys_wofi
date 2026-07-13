@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Usage: ./format_keybinds.sh keybinds.csv
+# CSV format: keys;description
+# Example: CTRL+B X;Some action
+
+input="$1"
+
+if [[ ! -f "$input" ]]; then
+  echo "File not found: $input" >&2
+  exit 1
+fi
+
+### ─── Style Config ────────────────────────────────────────────────
+KEY_BG="#e0e0e0"
+KEY_FG="#000000"
+KEY_FONT="monospace"
+TEXT_FG="#e0e0e0"
+TEXT_FONT="CaskaydiaMono Nerd Font"
+SYMBOL_FG="#999999"
+RISE="2000"        # vertical offset for key text (looks centered)
+ARROW="→"          # arrow between sequences
+### ────────────────────────────────────────────────────────────────
+
+# Determine max key string length for alignment
+max_len=0
+while IFS=';' read -r keys desc; do
+  keys=$(echo "$keys" | xargs)
+  len=${#keys}
+  (( len > max_len )) && max_len=$len
+done < "$input"
+
+# Function to render one key
+render_key() {
+  echo "<span font=\"$KEY_FONT\" background=\"$KEY_BG\" foreground=\"$KEY_FG\" rise=\"$RISE\"> $1 </span>"
+}
+
+# Read again and format output
+while IFS=';' read -r keys desc; do
+  keys=$(echo "$keys" | xargs)
+  desc=$(echo "$desc" | xargs)
+
+  formatted_keys=""
+
+  # Split on spaces first (for sequences)
+  IFS=' ' read -ra sequences <<< "$keys"
+  for seq_index in "${!sequences[@]}"; do
+    sequence="${sequences[$seq_index]}"
+
+    # Split combo parts (like CTRL+B)
+    IFS='+' read -ra combo <<< "$sequence"
+    for combo_index in "${!combo[@]}"; do
+      key="${combo[$combo_index]}"
+      formatted_keys+=$(render_key "$key")
+      # Add '+' between combo parts
+      if (( combo_index < ${#combo[@]} - 1 )); then
+        formatted_keys+="<span font=\"$KEY_FONT\" foreground=\"$SYMBOL_FG\"> + </span>"
+      fi
+    done
+
+    # Add arrow between sequences
+    if (( seq_index < ${#sequences[@]} - 1 )); then
+      formatted_keys+="<span font=\"$KEY_FONT\" foreground=\"$SYMBOL_FG\"> $ARROW </span> "
+    fi
+  done
+
+  # Calculate tab-based padding (approx alignment)
+  tabs=$(( (max_len - ${#keys}) / 8 + 1 ))
+  padding=""
+  for ((i=0; i<tabs; i++)); do padding+="\t"; done
+
+  echo -e "<span>${formatted_keys}${padding}<b><span font=\"$TEXT_FONT\" foreground=\"$TEXT_FG\">${desc}</span></b></span>"
+done < "$input"
+

@@ -1,0 +1,3 @@
+jlink
+nrf-udev
+nrfconnect-appimage

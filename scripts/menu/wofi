@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+STYLES_FILE="$SCRIPT_DIR/style.css"
+
+# Constants
+divider="---------"
+doexit="Exit"
+goback="Back"
+
+wofi_menu() {
+    prompt=$1
+    options=$2
+    if [[ -z $3 ]]; then
+        nr_options=$(echo -e "$options" | wc -l)
+        if [[ -n $max_lines ]]; then
+            if (( nr_options > max_lines )); then
+                nr_options=$max_lines
+            fi
+        fi
+    else
+        nr_options=$3
+    fi
+    wofi_command="wofi -d -i -M fuzzy -k /dev/null --style $STYLES_FILE -p "
+    chosen="$(echo -e "$options" | $wofi_command "$prompt" -L "$nr_options")"
+    echo "$chosen"
+    return 0
+}
+
+: '
+# Copy this menu for a good starting point
+menu() {
+    sub_options="$divider"
+    case $1 in
+        -s | --sub-command)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    while true; do
+        options="$sub_options"
+        chosen="$(wofi_menu "menu" "$options")"
+
+        case $chosen in
+            $divider)
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+        esac
+    done
+}
+
+menu "$@"
+'

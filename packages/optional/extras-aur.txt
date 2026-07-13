@@ -1,0 +1,5 @@
+spotify
+visual-studio-code-bin
+1password
+tesseract-git
+v4l2-relayd

@@ -1,0 +1,7 @@
+# User-level systemd units enabled by stages/30-services.sh.
+# pipewire.socket / pipewire-pulse.socket / p11-kit-server.socket are pulled
+# in automatically by their owning packages and don't need explicit enabling.
+
+hyprdynamicmonitors-prepare.service
+wireplumber.service
+xdg-user-dirs.service

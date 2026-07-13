@@ -1,0 +1,51 @@
+# hyprdynamicmonitors — dynamic monitor switching for dock/undock.
+# Docs: https://hyprdynamicmonitors.filipmikina.com/
+
+[general]
+# Where the active profile's layout is written; sourced by hyprland.conf.
+destination = "$HOME/.config/hypr/monitors.conf"
+# Hyprland 0.55 won't re-power eDP-1 leaving the all-outputs-removed state via
+# IPC alone; a `hyprctl reload` (re-reading the freshly written monitors.conf)
+# is the proven fix, so force it after every profile switch.
+post_apply_exec = "hyprctl reload"
+
+# Home dock: both home ASUS VG27A externals present -> externals only, laptop off.
+[profiles.home-dock]
+config_file = "hyprconfigs/home-dock.conf"
+config_file_type = "static"
+
+[[profiles.home-dock.conditions.required_monitors]]
+description = "VG27A LCLMQS143398"
+match_description_using_regex = true
+
+[[profiles.home-dock.conditions.required_monitors]]
+description = "VG27A LCLMQS143396"
+match_description_using_regex = true
+
+# Work dock: two Dell P2723DE externals present -> externals only, laptop off.
+# Matched by serial so home-dock and work-dock never collide.
+[profiles.work-dock]
+config_file = "hyprconfigs/work-dock.conf"
+config_file_type = "static"
+
+[[profiles.work-dock.conditions.required_monitors]]
+description = "DELL P2723DE JWSDH14"
+match_description_using_regex = true
+
+[[profiles.work-dock.conditions.required_monitors]]
+description = "DELL P2723DE 466F714"
+match_description_using_regex = true
+
+# Single external (Samsung LS27D60xU) -> laptop panel stays on, monitor to its left.
+[profiles.single-monitor]
+config_file = "hyprconfigs/single-monitor.conf"
+config_file_type = "static"
+
+[[profiles.single-monitor.conditions.required_monitors]]
+description = "Samsung Electric Company LS27D60xU HK2Y700227"
+match_description_using_regex = true
+
+# Anything else (no externals) -> laptop only.
+[fallback_profile]
+config_file = "hyprconfigs/laptop.conf"
+config_file_type = "static"

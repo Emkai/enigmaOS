@@ -1,0 +1,8 @@
+# Embedded/firmware dev toolchain.
+
+arm-none-eabi-gcc
+arm-none-eabi-newlib
+openocd
+stlink
+esptool
+platformio-core
