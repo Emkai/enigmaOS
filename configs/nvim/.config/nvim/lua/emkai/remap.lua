@@ -115,6 +115,9 @@ end, { desc = "Toggle git diff overlay" })
 vim.keymap.set("n", "<leader>gp", function()
 	require("emkai.gitpr").create_pr()
 end, { noremap = true, silent = true, desc = "Create PR (monday ticket) → origin/main" })
+vim.keymap.set("n", "<leader>gr", function()
+	require("emkai.gitcommit").review_latest()
+end, { noremap = true, silent = true, desc = "Review latest commit (claude)" })
 
 -- Debugger
 wk.add({

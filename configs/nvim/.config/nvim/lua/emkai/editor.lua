@@ -5,6 +5,9 @@ vim.opt.scrolloff = 18
 vim.opt.formatoptions:remove("o")
 
 require('mini.diff').setup()
+-- Floating, auto-fading notifications; also lets us update a message in place
+-- (e.g. the async commit review transitions "Reviewing…" → result on one popup).
+require('mini.notify').setup()
 vim.diagnostic.config({ virtual_text = true })
 
 require('oil').setup({

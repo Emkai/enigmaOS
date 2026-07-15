@@ -5,22 +5,49 @@
 
 local MODEL = "sonnet"       -- good balance of speed and message quality
 local MAX_DIFF_BYTES = 60000 -- cap the payload so huge commits stay quick
+local TIMEOUT_MS = 120000    -- per-attempt cap; cold starts + API latency add up
+local MAX_ATTEMPTS = 3       -- retry transient failures (overload/rate-limit/network)
+local RETRY_BASE_MS = 2000   -- backoff grows: 2s, 4s, ...
 
 local function claude_available()
     return vim.fn.executable("claude") == 1
 end
 
+-- A short, human-readable reason for a failed claude run.
+local function fail_detail(res)
+    if res.code == 124 or res.signal == 15 then return "timed out" end
+    local detail = vim.trim(res.stderr or "")
+    if detail == "" then detail = "no output" end
+    return ("exit %s: %s"):format(res.code, vim.split(detail, "\n")[1])
+end
+
 -- Run claude in print mode with MCP disabled, feeding `prompt` on stdin.
-local function ask_claude(prompt, cwd, on_result)
+-- Retries transient failures (non-zero exit or empty output) with exponential
+-- backoff; on_result fires once (on success or after the last try). opts.on_retry
+-- (res, failed_attempt, next_attempt) fires before each retry so callers can
+-- surface progress.
+local function ask_claude(prompt, cwd, on_result, opts, _attempt)
+    opts = opts or {}
+    local attempt = _attempt or 1
     local cmd = {
         "claude", "-p",
         "--model", MODEL,
         "--mcp-config", '{"mcpServers":{}}',
         "--strict-mcp-config",
     }
-    vim.system(cmd, { stdin = prompt, text = true, cwd = cwd, timeout = 60000 },
+    vim.system(cmd, { stdin = prompt, text = true, cwd = cwd, timeout = TIMEOUT_MS },
         function(res)
-            vim.schedule(function() on_result(res) end)
+            vim.schedule(function()
+                local ok = res.code == 0 and res.stdout and res.stdout ~= ""
+                if ok or attempt >= MAX_ATTEMPTS then
+                    on_result(res)
+                else
+                    if opts.on_retry then opts.on_retry(res, attempt, attempt + 1) end
+                    vim.defer_fn(function()
+                        ask_claude(prompt, cwd, on_result, opts, attempt + 1)
+                    end, RETRY_BASE_MS * attempt)
+                end
+            end)
         end)
 end
 
@@ -90,22 +117,51 @@ local function review_commit(cwd)
     if not claude_available() then return end
     local show = git_output(cwd, { "show", "HEAD", "--stat", "--patch" })
     if not show or show == "" then return end
-    vim.notify("Reviewing commit via claude...")
+
+    -- Drive ONE notification through the whole lifecycle (running → retrying →
+    -- done/failed) so it's always clear what state the review is in. `finish`
+    -- writes the terminal state, then fades the popup after `linger` ms.
+    local MiniNotify = require("mini.notify")
+    local id = MiniNotify.add("Reviewing latest commit via claude…", "INFO")
+    local function finish(msg, level, linger)
+        MiniNotify.update(id, { msg = msg, level = level })
+        vim.defer_fn(function() pcall(MiniNotify.remove, id) end, linger)
+    end
+
     ask_claude(REVIEW_PROMPT .. truncate(show), cwd, function(res)
         if res.code ~= 0 or not res.stdout or res.stdout == "" then
-            vim.notify("claude review failed: " .. (res.stderr or "no output"),
-                vim.log.levels.WARN)
+            finish("claude review failed (" .. fail_detail(res) .. ")", "WARN", 8000)
             return
         end
         local issue = vim.trim(res.stdout):match("ISSUE:%s*(.+)")
         if issue then
             issue = vim.split(issue, "\n")[1]
-            vim.notify("Commit Issue: " .. issue, vim.log.levels.WARN)
+            finish("Commit issue: " .. issue, "WARN", 10000)
             vim.fn.system({ "notify-send", "-u", "critical", "Commit Issue", issue })
         else
-            vim.notify("Commit review: OK")
+            finish("Commit review: OK — no issues found", "INFO", 4000)
         end
-    end)
+    end, {
+        -- Show each retry in place, including why the previous attempt failed.
+        on_retry = function(res, failed, next_attempt)
+            MiniNotify.update(id, {
+                msg = ("Review attempt %d failed (%s) — retrying %d/%d…")
+                    :format(failed, fail_detail(res), next_attempt, MAX_ATTEMPTS),
+                level = "WARN",
+            })
+        end,
+    })
+end
+
+-- Public: manually review HEAD (the latest commit), resolving the repo root
+-- from the current buffer. Bound to a keymap; the autocmd path stays automatic.
+local M = {}
+
+function M.review_latest()
+    if not claude_available() then
+        return vim.notify("claude CLI not found", vim.log.levels.ERROR)
+    end
+    review_commit(repo_root(0))
 end
 
 vim.api.nvim_create_autocmd("FileType", {
@@ -151,3 +207,5 @@ vim.api.nvim_create_autocmd("FileType", {
         end
     end,
 })
+
+return M
