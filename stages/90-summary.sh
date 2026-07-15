@@ -18,5 +18,10 @@ cat <<'EOF'
   5. `tailscale up`.
   6. Import any VPN/RDP connection profiles you need (the vpn/rdp menus
      start empty on a fresh machine — credentials are never stored in git).
+  7. Dolphin: open Settings > Configure Dolphin > Interface > Previews and
+     enable all available plugins (the ones baked into dolphinrc are a best
+     guess — this confirms/fixes the real plugin id string for this Dolphin
+     version). Run `kvantummanager` once to confirm the TokyoNight theme
+     loaded without errors.
 
 EOF

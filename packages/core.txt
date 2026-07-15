@@ -76,6 +76,23 @@ github-cli
 stow
 openssh
 
+# Double-click default for video/*
+vlc
+
+# Archive support for Dolphin's built-in Extract/Compress context menu
+ark
+p7zip
+unrar
+zip
+
+# Dolphin thumbnails (images + video) and Qt6 theming (qt6ct + Kvantum)
+imv
+ffmpegthumbnailer
+kdegraphics-thumbnailers
+kimageformats
+qt6ct
+kvantum
+
 # Power/hardware management
 bolt
 powertop

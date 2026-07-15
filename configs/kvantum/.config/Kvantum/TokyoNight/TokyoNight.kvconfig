@@ -1,0 +1,22 @@
+[%General]
+author=enigmaOS
+comment=Tokyo Night recolor of a bundled Kvantum base theme
+
+[GeneralColors]
+window.color=#1a1b26
+inactive.window.color=#16161e
+base.color=#1a1b26
+alt.base.color=#16161e
+button.color=#24283b
+light.color=#414868
+dark.color=#0f0f17
+text.color=#c0caf5
+window.text.color=#c0caf5
+button.text.color=#c0caf5
+disabled.text.color=#565f89
+highlight.color=#7aa2f7
+highlight.text.color=#1a1b26
+tooltip.base.color=#22233a
+tooltip.text.color=#f8f8f2
+link.color=#7aa2f7
+link.visited.color=#bb9af7

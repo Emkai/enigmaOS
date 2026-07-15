@@ -37,7 +37,6 @@ solaar
 samba
 smartmontools
 socat
-imv
 libxcrypt-compat
 tesseract-data-eng
 tesseract-data-swe
