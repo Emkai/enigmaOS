@@ -5,18 +5,38 @@
 
 local MODEL = "sonnet"       -- good balance of speed and message quality
 local MAX_DIFF_BYTES = 60000 -- cap the payload so huge commits stay quick
-local TIMEOUT_MS = 120000    -- per-attempt cap; cold starts + API latency add up
+-- A real review call measured ~90s (claude -p startup + sonnet inference over a
+-- ~30KB prompt), so 120s left almost no headroom: a busier API or a bigger diff
+-- would cross it and get SIGTERM'd (seen as exit 143). Give ~2x the observed time.
+local TIMEOUT_MS = 240000    -- per-attempt cap
 local MAX_ATTEMPTS = 3       -- retry transient failures (overload/rate-limit/network)
 local RETRY_BASE_MS = 2000   -- backoff grows: 2s, 4s, ...
+local LOG_FILE = vim.fn.stdpath("cache") .. "/gitcommit-claude.log"
 
 local function claude_available()
     return vim.fn.executable("claude") == 1
 end
 
--- A short, human-readable reason for a failed claude run.
-local function fail_detail(res)
-    if res.code == 124 or res.signal == 15 then return "timed out" end
+-- Append one diagnostic line to the log so failures are always explainable
+-- after the fact (the notification is transient; this is not).
+local function log_line(msg)
+    local f = io.open(LOG_FILE, "a")
+    if not f then return end
+    f:write(("[%s] %s\n"):format(os.date("%Y-%m-%d %H:%M:%S"), msg))
+    f:close()
+end
+
+-- A short, human-readable reason for a failed claude run. `elapsed_s` (optional)
+-- lets timeouts report how long they ran before being killed.
+local function fail_detail(res, elapsed_s)
+    -- vim.system's timeout kills with SIGTERM; depending on platform that shows
+    -- up as signal 15/9 or exit 143/137 (128 + signal). 124 = coreutils timeout.
+    if res.code == 124 or res.code == 143 or res.code == 137
+        or res.signal == 15 or res.signal == 9 then
+        return elapsed_s and ("timed out after %ds"):format(elapsed_s) or "timed out"
+    end
     local detail = vim.trim(res.stderr or "")
+    if detail == "" then detail = vim.trim(res.stdout or "") end
     if detail == "" then detail = "no output" end
     return ("exit %s: %s"):format(res.code, vim.split(detail, "\n")[1])
 end
@@ -25,20 +45,31 @@ end
 -- Retries transient failures (non-zero exit or empty output) with exponential
 -- backoff; on_result fires once (on success or after the last try). opts.on_retry
 -- (res, failed_attempt, next_attempt) fires before each retry so callers can
--- surface progress.
+-- surface progress. opts.label tags the operation in the log. Every attempt's
+-- outcome (timing, exit/signal, stderr) is written to LOG_FILE and res.elapsed_s
+-- is set so callers can report it.
 local function ask_claude(prompt, cwd, on_result, opts, _attempt)
     opts = opts or {}
     local attempt = _attempt or 1
+    local label = opts.label or "claude"
     local cmd = {
         "claude", "-p",
         "--model", MODEL,
         "--mcp-config", '{"mcpServers":{}}',
         "--strict-mcp-config",
     }
+    local uv = vim.uv or vim.loop
+    local start = uv.hrtime()
     vim.system(cmd, { stdin = prompt, text = true, cwd = cwd, timeout = TIMEOUT_MS },
         function(res)
+            res.elapsed_s = math.floor((uv.hrtime() - start) / 1e9 + 0.5)
             vim.schedule(function()
                 local ok = res.code == 0 and res.stdout and res.stdout ~= ""
+                local stderr = vim.trim(res.stderr or "")
+                log_line(("%s attempt %d/%d: %s in %ds (exit=%s signal=%s)%s"):format(
+                    label, attempt, MAX_ATTEMPTS,
+                    ok and "OK" or "FAIL", res.elapsed_s, res.code, res.signal or 0,
+                    stderr ~= "" and ("\n  stderr: " .. stderr:sub(1, 800)) or ""))
                 if ok or attempt >= MAX_ATTEMPTS then
                     on_result(res)
                 else
@@ -130,7 +161,8 @@ local function review_commit(cwd)
 
     ask_claude(REVIEW_PROMPT .. truncate(show), cwd, function(res)
         if res.code ~= 0 or not res.stdout or res.stdout == "" then
-            finish("claude review failed (" .. fail_detail(res) .. ")", "WARN", 8000)
+            finish("claude review failed (" .. fail_detail(res, res.elapsed_s)
+                .. ") — :ClaudeCommitLog for details", "WARN", 10000)
             return
         end
         local issue = vim.trim(res.stdout):match("ISSUE:%s*(.+)")
@@ -142,11 +174,12 @@ local function review_commit(cwd)
             finish("Commit review: OK — no issues found", "INFO", 4000)
         end
     end, {
+        label = "review",
         -- Show each retry in place, including why the previous attempt failed.
         on_retry = function(res, failed, next_attempt)
             MiniNotify.update(id, {
                 msg = ("Review attempt %d failed (%s) — retrying %d/%d…")
-                    :format(failed, fail_detail(res), next_attempt, MAX_ATTEMPTS),
+                    :format(failed, fail_detail(res, res.elapsed_s), next_attempt, MAX_ATTEMPTS),
                 level = "WARN",
             })
         end,
@@ -163,6 +196,18 @@ function M.review_latest()
     end
     review_commit(repo_root(0))
 end
+
+-- Open the per-attempt diagnostic log (timing, exit/signal, stderr).
+function M.open_log()
+    if vim.fn.filereadable(LOG_FILE) == 0 then
+        return vim.notify("No claude commit log yet: " .. LOG_FILE, vim.log.levels.INFO)
+    end
+    vim.cmd("tabedit " .. vim.fn.fnameescape(LOG_FILE))
+    vim.cmd("normal! G")
+end
+
+vim.api.nvim_create_user_command("ClaudeCommitLog", M.open_log,
+    { desc = "Open the claude commit/review diagnostic log" })
 
 vim.api.nvim_create_autocmd("FileType", {
     pattern = "gitcommit",
@@ -191,7 +236,8 @@ vim.api.nvim_create_autocmd("FileType", {
                     return
                 end
                 if res.code ~= 0 or not res.stdout or res.stdout == "" then
-                    finish("commit message failed (" .. fail_detail(res) .. ")", "WARN", 8000)
+                    finish("commit message failed (" .. fail_detail(res, res.elapsed_s)
+                        .. ") — :ClaudeCommitLog for details", "WARN", 10000)
                     return
                 end
                 if not is_empty_message(buf) then
@@ -202,11 +248,12 @@ vim.api.nvim_create_autocmd("FileType", {
                 vim.api.nvim_buf_set_lines(buf, 0, 0, false, lines)
                 finish("Commit message generated", "INFO", 3000)
             end, {
+                label = "commit-msg",
                 -- Show each retry in place, including why the previous attempt failed.
                 on_retry = function(res, failed, next_attempt)
                     MiniNotify.update(id, {
                         msg = ("Commit message attempt %d failed (%s) — retrying %d/%d…")
-                            :format(failed, fail_detail(res), next_attempt, MAX_ATTEMPTS),
+                            :format(failed, fail_detail(res, res.elapsed_s), next_attempt, MAX_ATTEMPTS),
                         level = "WARN",
                     })
                 end,
