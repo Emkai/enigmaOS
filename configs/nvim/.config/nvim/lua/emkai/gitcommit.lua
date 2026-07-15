@@ -192,10 +192,17 @@ vim.api.nvim_create_autocmd("FileType", {
         end
 
         if pre_sha ~= "" then
+            -- NOTE: `once` fires once PER event, and wiping the commit buffer
+            -- triggers both BufUnload and BufWipeout — so guard against the
+            -- double dispatch to avoid reviewing twice. Both events are kept
+            -- for coverage across commit flows (some unload, some wipe).
+            local triggered = false
             vim.api.nvim_create_autocmd({ "BufUnload", "BufWipeout" }, {
                 buffer = buf,
                 once = true,
                 callback = function()
+                    if triggered then return end
+                    triggered = true
                     vim.defer_fn(function()
                         local post = vim.trim(git_output(cwd, { "rev-parse", "HEAD" }) or "")
                         if post ~= "" and post ~= pre_sha then
