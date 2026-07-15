@@ -177,18 +177,40 @@ vim.api.nvim_create_autocmd("FileType", {
         if diff and diff ~= "" and not vim.b[buf].claude_commit_generated
             and is_empty_message(buf) then
             vim.b[buf].claude_commit_generated = true
-            vim.notify("Generating commit message via claude...")
+            -- Persistent notification (like the review): stays up while claude
+            -- works, then updates in place to the result / retries.
+            local MiniNotify = require("mini.notify")
+            local id = MiniNotify.add("Generating commit message via claude…", "INFO")
+            local function finish(msg, level, linger)
+                MiniNotify.update(id, { msg = msg, level = level })
+                vim.defer_fn(function() pcall(MiniNotify.remove, id) end, linger)
+            end
             ask_claude(COMMIT_PROMPT .. truncate(diff), cwd, function(res)
-                if not vim.api.nvim_buf_is_valid(buf) then return end
-                if res.code ~= 0 or not res.stdout or res.stdout == "" then
-                    vim.notify("claude failed: " .. (res.stderr or "no output"),
-                        vim.log.levels.WARN)
+                if not vim.api.nvim_buf_is_valid(buf) then
+                    pcall(MiniNotify.remove, id)
                     return
                 end
-                if not is_empty_message(buf) then return end
+                if res.code ~= 0 or not res.stdout or res.stdout == "" then
+                    finish("commit message failed (" .. fail_detail(res) .. ")", "WARN", 8000)
+                    return
+                end
+                if not is_empty_message(buf) then
+                    pcall(MiniNotify.remove, id) -- user typed their own; step aside
+                    return
+                end
                 local lines = vim.split(clean_output(res.stdout), "\n", { plain = true })
                 vim.api.nvim_buf_set_lines(buf, 0, 0, false, lines)
-            end)
+                finish("Commit message generated", "INFO", 3000)
+            end, {
+                -- Show each retry in place, including why the previous attempt failed.
+                on_retry = function(res, failed, next_attempt)
+                    MiniNotify.update(id, {
+                        msg = ("Commit message attempt %d failed (%s) — retrying %d/%d…")
+                            :format(failed, fail_detail(res), next_attempt, MAX_ATTEMPTS),
+                        level = "WARN",
+                    })
+                end,
+            })
         end
 
         if pre_sha ~= "" then
