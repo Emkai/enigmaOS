@@ -24,18 +24,23 @@ make flash                    # or: ./iso/flash-usb.sh [iso/out/enigmaos-*.iso]
 1. The live environment auto-launches the **guided installer** on tty1.
 2. It checks you're online (offers a Wi-Fi prompt if not), then asks for:
    the **target disk** (with a typed `YES` confirmation before wiping),
-   **hostname**, **username**, **password**, and whether to **encrypt the
-   disk** (default yes — you set a LUKS passphrase you'll type at every boot).
+   **hostname**, **username**, **password**, whether to **encrypt the disk**
+   (default yes), and whether to **enroll TPM2 + PIN unlock** (default yes —
+   the passphrase you set becomes a recovery key).
 3. It does the base install: GPT partitioning (1 GiB EFI + root), optional
-   **LUKS2 encryption of the root partition**, `pacstrap` of a minimal base,
-   systemd-boot, your user with sudo, NetworkManager enabled (Wi-Fi
-   credentials carried over if you used them).
+   **LUKS2 encryption of the root partition** on the systemd/`sd-encrypt`
+   initramfs stack, `pacstrap` of a minimal base, systemd-boot, your user
+   with sudo, NetworkManager enabled (Wi-Fi credentials carried over if you
+   used them).
 4. It copies this repo to `~/src/enigmaOS` on the new system and arms a
    **one-shot first-boot** step.
-5. Reboot. On first boot the machine auto-logs in on tty1 and runs the
-   repo's own `install.sh` — packages, AUR builds, dotfiles (`stow`),
-   services — then reboots into the SDDM login screen. Pick the
-   **Hyprland (uwsm)** session.
+5. Reboot. The first boot unlocks with the **recovery passphrase** (the TPM
+   isn't enrolled yet), auto-logs in on tty1, and — if TPM enrollment was
+   chosen — **enrolls the TPM2 keyslot and prompts you to set a PIN** (this
+   must happen here, on the real boot, so the measured boot state matches).
+   It then runs the repo's own `install.sh` — packages, AUR builds, dotfiles
+   (`stow`), services — and reboots into the SDDM login screen. Pick the
+   **Hyprland (uwsm)** session. From then on, boot asks for the **PIN**.
 
 The base install and the desktop install stay separate on purpose:
 `install.sh` runs on the real, booted system (a proper user session +
@@ -50,13 +55,25 @@ Top of `iso/airootfs/usr/local/bin/enigma-install`:
 - systemd-boot
 - **LUKS2 disk encryption** — prompted at install (default yes). Encrypts
   the **root partition only**; the ESP (`/boot`) stays unencrypted so
-  systemd-boot can load the kernel — the standard, robust layout. Unlocked
-  at boot by a passphrase via the `encrypt` mkinitcpio hook.
+  systemd-boot can load the kernel — the standard, robust layout. Uses the
+  systemd/`sd-encrypt` initramfs stack.
+- **TPM2 + PIN auto-unlock** — prompted (default yes). On first boot,
+  `systemd-cryptenroll` binds a keyslot to the TPM with a PIN, so normal
+  boots ask only for a short PIN (rate-limited by the TPM) instead of the
+  full passphrase. The install-time passphrase stays as a **recovery key**.
+  Needs a TPM2 chip — if none is found, enrollment is skipped and the
+  passphrase is used. `TPM_PCRS` (default `7`) controls PCR binding; after a
+  firmware/Secure-Boot change the TPM may refuse and you unlock with the
+  recovery passphrase, then re-run `systemd-cryptenroll`.
 - root account locked; the created user has sudo via the `wheel` group
 
-Not wired in: encrypting `/boot` (needs GRUB or a UKI), TPM2 auto-unlock
-(`systemd-cryptenroll`), and alternative bootloaders. Add them in
-`enigma-install` if you want them.
+Not wired in: encrypting `/boot` (needs GRUB or a UKI), TPM2 without a PIN
+(edit the `--tpm2-with-pin` flag in `enigma-install`), and alternative
+bootloaders.
+
+> **Testing TPM in a VM:** a plain QEMU guest has no TPM. Add an emulated one
+> with `swtpm` (`-tpmdev emulator,... -device tpm-tis,...`) or the enrollment
+> step will just skip and fall back to the passphrase.
 
 ## Still not automated (same as a normal enigmaOS run)
 

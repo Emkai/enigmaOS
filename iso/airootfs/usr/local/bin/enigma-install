@@ -17,7 +17,12 @@ KEYMAP="us"
 TIMEZONE="Europe/Stockholm"
 # Minimal base: enough to boot, get on the network, and let install.sh do the
 # rest. install.sh's core.txt re-lists most of these; pacman --needed skips.
-BASE_PACKAGES=(base linux linux-firmware sudo networkmanager git base-devel stow vim cryptsetup)
+# tpm2-tss lets systemd-cryptenroll / the initramfs talk to the TPM.
+BASE_PACKAGES=(base linux linux-firmware sudo networkmanager git base-devel stow vim cryptsetup tpm2-tss)
+# TPM2 keyslot binds to these PCRs (comma/plus separated). 7 = Secure Boot
+# state — the most update-stable choice; adds modest tamper-evidence without
+# breaking on every kernel/firmware bump. Set empty for none (PIN + TPM only).
+TPM_PCRS="7"
 # Where build-iso.sh baked this repo into the live filesystem.
 REPO_SRC="/usr/local/share/enigmaOS"
 # -----------------------------------------------------------------------------
@@ -118,9 +123,16 @@ gather() {
         ENCRYPT=0
     else
         ENCRYPT=1
-        echo "  (you'll type this passphrase at every boot to unlock the disk)"
+        read -rp "Enroll TPM2 + PIN auto-unlock on first boot? [Y/n] " a2
+        [[ "${a2,,}" == n* ]] && TPM_ENROLL=0 || TPM_ENROLL=1
+        if [[ "$TPM_ENROLL" == 1 ]]; then
+            echo "  (the disk passphrase below becomes a RECOVERY key; day to day you'll"
+            echo "   type a short PIN at boot. The PIN itself is set on first boot.)"
+        else
+            echo "  (you'll type this passphrase at every boot to unlock the disk)"
+        fi
         while :; do
-            read -rsp "Disk encryption passphrase: " LP1; echo
+            read -rsp "Disk encryption passphrase (recovery key): " LP1; echo
             read -rsp "Repeat passphrase: " LP2; echo
             [[ -n "$LP1" && "$LP1" == "$LP2" ]] && break
             echo "  empty or mismatch, try again."
@@ -182,17 +194,20 @@ do_pacstrap() {
 
 configure_system() {
     log "Configuring locale, time, hostname, bootloader, user."
-    local cmdline
+    local cmdline luks_uuid=""
     if [[ "$ENCRYPT" == 1 ]]; then
-        cmdline="cryptdevice=UUID=$LUKS_UUID:cryptroot root=/dev/mapper/cryptroot rw"
+        # sd-encrypt reads /etc/crypttab.initramfs for the mapping, so the
+        # cmdline only names the resulting root device.
+        cmdline="root=/dev/mapper/cryptroot rw"
+        luks_uuid="$LUKS_UUID"
     else
         cmdline="root=PARTUUID=$(blkid -s PARTUUID -o value "$ROOT_PART") rw"
     fi
 
     arch-chroot /mnt /bin/bash -s -- \
-        "$TIMEZONE" "$LOCALE" "$KEYMAP" "$HOSTNAME" "$USERNAME" "$UCODE_IMG" "$cmdline" "$ENCRYPT" <<'CHROOT'
+        "$TIMEZONE" "$LOCALE" "$KEYMAP" "$HOSTNAME" "$USERNAME" "$UCODE_IMG" "$cmdline" "$ENCRYPT" "$luks_uuid" <<'CHROOT'
 set -euo pipefail
-TIMEZONE="$1"; LOCALE="$2"; KEYMAP="$3"; HOSTNAME="$4"; USERNAME="$5"; UCODE_IMG="$6"; CMDLINE="$7"; ENCRYPT="$8"
+TIMEZONE="$1"; LOCALE="$2"; KEYMAP="$3"; HOSTNAME="$4"; USERNAME="$5"; UCODE_IMG="$6"; CMDLINE="$7"; ENCRYPT="$8"; LUKS_UUID="$9"
 
 ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 hwclock --systohc
@@ -210,10 +225,13 @@ cat > /etc/hosts <<HOSTS
 127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
 HOSTS
 
-# encrypted root: add the `encrypt` hook (between block and filesystems) and
-# rebuild the initramfs so early boot can unlock the LUKS container.
+# encrypted root: use the systemd-based initramfs + sd-encrypt hook (this is
+# what supports TPM2 unlocking). crypttab.initramfs defines the mapping;
+# `tpm2-device=auto` makes early boot try the TPM (and prompt for the PIN once
+# a keyslot is enrolled on first boot), falling back to the passphrase.
 if [[ "$ENCRYPT" == 1 ]]; then
-    sed -i '/^HOOKS=/{/encrypt/!s/\bfilesystems\b/encrypt filesystems/}' /etc/mkinitcpio.conf
+    sed -i 's/^HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems fsck)/' /etc/mkinitcpio.conf
+    echo "cryptroot UUID=$LUKS_UUID - tpm2-device=auto" > /etc/crypttab.initramfs
     mkinitcpio -P
 fi
 
@@ -287,6 +305,13 @@ NMCONN
     install -d -m755 /mnt/var/lib/enigma
     touch /mnt/var/lib/enigma/firstboot-pending
 
+    # config read by enigma-firstboot (TPM enrollment happens there, on the
+    # real boot, so the PCR measurements match the installed system)
+    cat > /mnt/var/lib/enigma/firstboot.env <<ENV
+TPM_ENROLL=${TPM_ENROLL:-0}
+TPM_PCRS=$TPM_PCRS
+ENV
+
     # temporary passwordless sudo so the unattended first boot doesn't stall
     echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > /mnt/etc/sudoers.d/00-enigma-firstboot
     chmod 0440 /mnt/etc/sudoers.d/00-enigma-firstboot
@@ -333,6 +358,34 @@ if ! ping -c1 -W1 archlinux.org &>/dev/null; then
     exit 0
 fi
 
+# --- TPM2 + PIN enrollment (done here, on the real boot, so the PCR values
+# match the installed system; the passphrase set at install stays as recovery)
+[ -f /var/lib/enigma/firstboot.env ] && . /var/lib/enigma/firstboot.env
+if [ "${TPM_ENROLL:-0}" = 1 ]; then
+    backing=$(sudo cryptsetup status cryptroot 2>/dev/null | awk '/device:/{print $2}')
+    if [ ! -e /sys/class/tpm/tpm0 ]; then
+        echo "[enigma-firstboot] no TPM2 detected — keeping passphrase unlock."
+    elif [ -z "$backing" ]; then
+        echo "[enigma-firstboot] could not find the LUKS device — skipping TPM enrollment."
+    elif sudo cryptsetup luksDump "$backing" | grep -qi 'tpm2'; then
+        echo "[enigma-firstboot] TPM2 keyslot already present — skipping enrollment."
+    else
+        echo
+        echo "[enigma-firstboot] Enrolling TPM2 + PIN unlock on $backing."
+        echo "  You'll be asked for the DISK PASSPHRASE (recovery key, to authorize),"
+        echo "  then to choose a PIN you'll type at boot from now on."
+        if sudo systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes \
+               ${TPM_PCRS:+--tpm2-pcrs="$TPM_PCRS"} "$backing"; then
+            echo "[enigma-firstboot] TPM enrolled. Next boot asks for the PIN; the"
+            echo "  passphrase still works as a recovery key."
+        else
+            echo "[enigma-firstboot] TPM enrollment failed — passphrase unlock still works."
+            echo "  You can retry later:  sudo systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=yes $backing"
+        fi
+        echo
+    fi
+fi
+
 cd "$HOME/src/enigmaOS" || { echo "repo missing at ~/src/enigmaOS"; exit 1; }
 if ./install.sh; then
     echo "[enigma-firstboot] desktop install complete — cleaning up."
@@ -345,8 +398,9 @@ if ./install.sh; then
     sleep 5
     sudo systemctl reboot
 else
+    rc=$?
     echo
-    echo "[enigma-firstboot] install.sh FAILED (exit $?)."
+    echo "[enigma-firstboot] install.sh FAILED (exit $rc)."
     echo "Fix the issue, then re-run:  cd ~/src/enigmaOS && ./install.sh"
     echo "Autologin stays on until it succeeds; re-login on tty1 to retry."
 fi
@@ -355,7 +409,7 @@ FIRSTBOOT
 }
 
 # ---- main -------------------------------------------------------------------
-WIFI_SSID=""; WIFI_PSK=""; ENCRYPT=0
+WIFI_SSID=""; WIFI_PSK=""; ENCRYPT=0; TPM_ENROLL=0
 banner
 ensure_network
 choose_disk
@@ -368,8 +422,11 @@ deploy_repo_and_firstboot
 umount -R /mnt 2>/dev/null || true
 echo
 ok "Base install done. Remove the USB and reboot."
-[[ "$ENCRYPT" == 1 ]] && ok "At boot you'll be prompted for the LUKS passphrase to unlock the disk."
-ok "Then it auto-logs in on tty1 and installs the Hyprland desktop,"
+if [[ "$ENCRYPT" == 1 ]]; then
+    ok "First boot unlocks with your recovery PASSPHRASE."
+    [[ "$TPM_ENROLL" == 1 ]] && ok "During first boot you'll set a PIN; every boot after that asks for the PIN."
+fi
+ok "It then auto-logs in on tty1 and installs the Hyprland desktop,"
 ok "and reboots into the SDDM login screen. Pick the 'Hyprland (uwsm)' session."
 echo
 read -rp "Reboot now? [y/N] " r
