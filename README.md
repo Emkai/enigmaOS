@@ -10,6 +10,11 @@ This assumes a **base Arch install already exists** — booted, networked, a
 user account created (e.g. via `archinstall`), and `sudo` working. It does
 not partition disks or run the base install; it picks up from there.
 
+**From bare metal instead?** `iso/` builds a bootable Arch USB with this
+repo baked in: build the ISO, flash it, boot the target, answer a few
+prompts (disk, hostname, user) and it does the base install *and* runs the
+desktop install for you. See [`iso/README.md`](iso/README.md).
+
 ## Layout
 
 - `configs/` — GNU Stow dotfiles (hypr, waybar, wofi, dunst, kitty, nvim, tmux, bash).

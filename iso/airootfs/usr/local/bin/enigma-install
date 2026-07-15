@@ -1,0 +1,376 @@
+#!/usr/bin/env bash
+# enigmaOS guided installer — runs inside the live Arch ISO produced by
+# iso/build-iso.sh. Does the *base* Arch install (partition, pacstrap,
+# systemd-boot, user, network), drops the baked-in enigmaOS repo into the
+# new user's ~/src/enigmaOS, then arms a one-shot first-boot autologin that
+# runs enigmaOS's own install.sh (the desktop layer) in its native
+# environment and reboots into SDDM.
+#
+# Layers deliberately stay split: THIS script only builds a bootable,
+# networked Arch box with a sudo user. Everything Hyprland is install.sh's
+# job, run on first boot where a real user session + network exist.
+set -uo pipefail
+
+# ---- Tunables (edit before building the ISO if you like) -------------------
+LOCALE="en_US.UTF-8"
+KEYMAP="us"
+TIMEZONE="Europe/Stockholm"
+# Minimal base: enough to boot, get on the network, and let install.sh do the
+# rest. install.sh's core.txt re-lists most of these; pacman --needed skips.
+BASE_PACKAGES=(base linux linux-firmware sudo networkmanager git base-devel stow vim cryptsetup)
+# Where build-iso.sh baked this repo into the live filesystem.
+REPO_SRC="/usr/local/share/enigmaOS"
+# -----------------------------------------------------------------------------
+
+c_blue=$'\033[1;34m'; c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_rst=$'\033[0m'
+log()  { printf '%s[enigma-install]%s %s\n' "$c_blue" "$c_rst" "$*"; }
+ok()   { printf '%s[enigma-install]%s %s\n' "$c_grn" "$c_rst" "$*"; }
+die()  { printf '%s[enigma-install] ERROR:%s %s\n' "$c_red" "$c_rst" "$*" >&2; exit 1; }
+
+trap 'die "aborted at line $LINENO. If partitioning had already started, the target disk may be in a half-written state — just re-run and it repartitions from scratch."' ERR
+set -E
+
+[[ $EUID -eq 0 ]] || die "run as root (you should already be root in the live ISO)."
+[[ -d /sys/firmware/efi/efivars ]] || die "not booted in UEFI mode. Reboot the USB in UEFI (disable CSM/Legacy)."
+[[ -d "$REPO_SRC" ]] || die "baked repo missing at $REPO_SRC — was this ISO built with build-iso.sh?"
+
+banner() {
+    cat <<'EOF'
+
+   ___ _ __ (_) __ _ _ __ ___   __ _
+  / _ \ '_ \| |/ _` | '_ ` _ \ / _` |   Arch + Hyprland, from bare metal.
+ |  __/ | | | | (_| | | | | | | (_| |
+  \___|_| |_|_|\__, |_| |_| |_|\__,_|   guided installer
+               |___/
+EOF
+    echo
+    echo "This will ERASE a disk of your choosing and install Arch + enigmaOS."
+    echo "Ctrl-C at any prompt to bail out to a shell."
+    echo
+}
+
+# ---- 1. Network -------------------------------------------------------------
+ensure_network() {
+    if ping -c1 -W2 archlinux.org &>/dev/null; then
+        ok "Network is up."
+        return
+    fi
+    log "No connectivity yet. Wired connections usually come up on their own."
+    read -rp "Configure Wi-Fi now? [Y/n] " a
+    [[ "${a,,}" == n* ]] && { ping -c1 -W2 archlinux.org &>/dev/null || die "still offline; connect a cable or configure Wi-Fi, then re-run: enigma-install"; return; }
+
+    local dev ssid pass w
+    dev=""
+    for w in /sys/class/net/*/wireless; do
+        [[ -e "$w" ]] || continue
+        dev=$(basename "$(dirname "$w")")
+        break
+    done
+    [[ -n "$dev" ]] || die "no Wi-Fi interface found (none of /sys/class/net/*/wireless exist)."
+    log "Scanning on $dev ..."
+    iwctl station "$dev" scan; sleep 2
+    iwctl station "$dev" get-networks
+    read -rp "SSID: " ssid
+    read -rsp "Passphrase: " pass; echo
+    iwctl --passphrase "$pass" station "$dev" connect "$ssid" \
+        || die "Wi-Fi connect failed."
+    log "Waiting for connectivity ..."
+    local i; for i in {1..20}; do ping -c1 -W1 archlinux.org &>/dev/null && break; sleep 1; done
+    ping -c1 -W2 archlinux.org &>/dev/null || die "connected to Wi-Fi but still no internet."
+    ok "Wi-Fi connected."
+    WIFI_SSID="$ssid"; WIFI_PSK="$pass"   # persisted to the target for first boot
+}
+
+# ---- 2. Gather answers ------------------------------------------------------
+choose_disk() {
+    echo; echo "Available disks:"
+    lsblk -dpno NAME,SIZE,MODEL | grep -vE 'loop|/dev/sr' | nl -w2 -s') '
+    echo
+    read -rp "Target disk (full path, e.g. /dev/nvme0n1): " DISK
+    [[ -b "$DISK" ]] || die "'$DISK' is not a block device."
+    lsblk -no MOUNTPOINT "$DISK" 2>/dev/null | grep -q '^/run/archiso' \
+        && die "'$DISK' looks like the USB you booted from. Pick the internal disk."
+    echo
+    lsblk "$DISK"
+    echo
+    printf '%sEVERYTHING on %s will be destroyed.%s\n' "$c_red" "$DISK" "$c_rst"
+    read -rp "Type YES (uppercase) to continue: " confirm
+    [[ "$confirm" == "YES" ]] || die "not confirmed."
+}
+
+gather() {
+    read -rp "Hostname [enigma]: " HOSTNAME; HOSTNAME="${HOSTNAME:-enigma}"
+    while :; do
+        read -rp "Username: " USERNAME
+        [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] && break
+        echo "  invalid (lowercase, start with letter/underscore)."
+    done
+    while :; do
+        read -rsp "Password for $USERNAME: " PASS1; echo
+        read -rsp "Repeat password: " PASS2; echo
+        [[ -n "$PASS1" && "$PASS1" == "$PASS2" ]] && break
+        echo "  empty or mismatch, try again."
+    done
+    USERPASS="$PASS1"; unset PASS1 PASS2
+
+    read -rp "Encrypt the disk with LUKS? [Y/n] " a
+    if [[ "${a,,}" == n* ]]; then
+        ENCRYPT=0
+    else
+        ENCRYPT=1
+        echo "  (you'll type this passphrase at every boot to unlock the disk)"
+        while :; do
+            read -rsp "Disk encryption passphrase: " LP1; echo
+            read -rsp "Repeat passphrase: " LP2; echo
+            [[ -n "$LP1" && "$LP1" == "$LP2" ]] && break
+            echo "  empty or mismatch, try again."
+        done
+        LUKSPASS="$LP1"; unset LP1 LP2
+    fi
+}
+
+# ---- 3. Partition + format --------------------------------------------------
+partdev() {  # partdev <disk> <n> -> handles nvme0n1p1 vs sda1
+    local d="$1" n="$2"
+    [[ "$d" == *[0-9] ]] && echo "${d}p${n}" || echo "${d}${n}"
+}
+
+do_disk() {
+    EFI_PART=$(partdev "$DISK" 1); ROOT_PART=$(partdev "$DISK" 2)
+    local scheme="1GiB EFI + rest ext4 root"
+    [[ "$ENCRYPT" == 1 ]] && scheme="1GiB EFI + rest LUKS2-encrypted ext4 root"
+    log "Wiping $DISK and creating GPT ($scheme)."
+    umount -R /mnt 2>/dev/null || true
+    swapoff -a 2>/dev/null || true
+    cryptsetup close cryptroot 2>/dev/null || true
+    wipefs -af "$DISK"
+    sgdisk --zap-all "$DISK"
+    sgdisk -n1:0:+1GiB -t1:ef00 -c1:EFI \
+           -n2:0:0     -t2:8300 -c2:root "$DISK"
+    partprobe "$DISK"; sleep 1
+    mkfs.fat -F32 -n EFI "$EFI_PART"
+
+    if [[ "$ENCRYPT" == 1 ]]; then
+        # Encrypt the root partition only; the ESP (/boot) stays plain so
+        # systemd-boot can read the kernel + initramfs. The `encrypt` mkinitcpio
+        # hook (added in configure_system) unlocks it at boot via the cmdline.
+        log "Creating LUKS2 container on $ROOT_PART (slow key derivation) ..."
+        printf '%s' "$LUKSPASS" | cryptsetup luksFormat --type luks2 --batch-mode "$ROOT_PART" -
+        log "Unlocking it as /dev/mapper/cryptroot ..."
+        printf '%s' "$LUKSPASS" | cryptsetup open "$ROOT_PART" cryptroot -
+        ROOT_FS=/dev/mapper/cryptroot
+        LUKS_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+    else
+        ROOT_FS="$ROOT_PART"
+    fi
+
+    mkfs.ext4 -F -L root "$ROOT_FS"
+    mount "$ROOT_FS" /mnt
+    mount --mkdir "$EFI_PART" /mnt/boot
+}
+
+# ---- 4. Base system ---------------------------------------------------------
+do_pacstrap() {
+    if grep -qi 'GenuineIntel' /proc/cpuinfo; then UCODE_PKG=intel-ucode; UCODE_IMG=intel-ucode.img
+    else UCODE_PKG=amd-ucode; UCODE_IMG=amd-ucode.img; fi
+    log "Installing base system (pacstrap) — this pulls packages over the network."
+    pacstrap -K /mnt "${BASE_PACKAGES[@]}" "$UCODE_PKG"
+    genfstab -U /mnt >> /mnt/etc/fstab
+    # give the chroot a resolver for the first-boot/AUR steps that come later
+    cp -f /etc/resolv.conf /mnt/etc/resolv.conf 2>/dev/null || true
+}
+
+configure_system() {
+    log "Configuring locale, time, hostname, bootloader, user."
+    local cmdline
+    if [[ "$ENCRYPT" == 1 ]]; then
+        cmdline="cryptdevice=UUID=$LUKS_UUID:cryptroot root=/dev/mapper/cryptroot rw"
+    else
+        cmdline="root=PARTUUID=$(blkid -s PARTUUID -o value "$ROOT_PART") rw"
+    fi
+
+    arch-chroot /mnt /bin/bash -s -- \
+        "$TIMEZONE" "$LOCALE" "$KEYMAP" "$HOSTNAME" "$USERNAME" "$UCODE_IMG" "$cmdline" "$ENCRYPT" <<'CHROOT'
+set -euo pipefail
+TIMEZONE="$1"; LOCALE="$2"; KEYMAP="$3"; HOSTNAME="$4"; USERNAME="$5"; UCODE_IMG="$6"; CMDLINE="$7"; ENCRYPT="$8"
+
+ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+hwclock --systohc
+
+sed -i "s/^#\s*\(${LOCALE//./\\.} \)/\1/" /etc/locale.gen
+grep -q "^${LOCALE} " /etc/locale.gen || echo "${LOCALE} UTF-8" >> /etc/locale.gen
+locale-gen
+echo "LANG=$LOCALE" > /etc/locale.conf
+echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+
+echo "$HOSTNAME" > /etc/hostname
+cat > /etc/hosts <<HOSTS
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
+HOSTS
+
+# encrypted root: add the `encrypt` hook (between block and filesystems) and
+# rebuild the initramfs so early boot can unlock the LUKS container.
+if [[ "$ENCRYPT" == 1 ]]; then
+    sed -i '/^HOOKS=/{/encrypt/!s/\bfilesystems\b/encrypt filesystems/}' /etc/mkinitcpio.conf
+    mkinitcpio -P
+fi
+
+# systemd-boot on the ESP mounted at /boot
+bootctl --esp-path=/boot install
+cat > /boot/loader/loader.conf <<LOADER
+default enigma.conf
+timeout 3
+console-mode max
+editor no
+LOADER
+cat > /boot/loader/entries/enigma.conf <<ENTRY
+title   EnigmaOS
+linux   /vmlinuz-linux
+initrd  /$UCODE_IMG
+initrd  /initramfs-linux.img
+options $CMDLINE
+ENTRY
+
+# user + sudo (root stays locked; wheel gets sudo)
+useradd -m -G wheel -s /bin/bash "$USERNAME"
+install -d -m750 /etc/sudoers.d
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel
+chmod 0440 /etc/sudoers.d/10-wheel
+passwd -l root
+
+# network on first boot
+systemctl enable NetworkManager.service
+CHROOT
+
+    # set the user's password (kept out of the process table / heredoc above)
+    printf '%s:%s\n' "$USERNAME" "$USERPASS" | arch-chroot /mnt chpasswd
+}
+
+# ---- 5. Ship the repo + arm the first-boot desktop install ------------------
+deploy_repo_and_firstboot() {
+    local home="/mnt/home/$USERNAME"
+    log "Copying enigmaOS repo -> ~$USERNAME/src/enigmaOS"
+    install -d "$home/src"
+    cp -a "$REPO_SRC" "$home/src/enigmaOS"
+
+    # skel ships .bashrc/.bash_profile; enigmaOS stows its own .bashrc, so a
+    # pre-existing one makes stow abort. Clear the skel defaults for a clean
+    # target (system-wide /etc/profile still drives our first-boot launcher).
+    rm -f "$home/.bashrc" "$home/.bash_profile" "$home/.bash_logout"
+    arch-chroot /mnt chown -R "$USERNAME:$USERNAME" "/home/$USERNAME/src" "/home/$USERNAME" 2>/dev/null || true
+
+    # persist Wi-Fi so the first boot is online before install.sh runs
+    if [[ -n "${WIFI_SSID:-}" ]]; then
+        log "Persisting Wi-Fi credentials for first boot."
+        install -d -m700 /mnt/etc/NetworkManager/system-connections
+        cat > "/mnt/etc/NetworkManager/system-connections/$WIFI_SSID.nmconnection" <<NMCONN
+[connection]
+id=$WIFI_SSID
+type=wifi
+[wifi]
+mode=infrastructure
+ssid=$WIFI_SSID
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$WIFI_PSK
+[ipv4]
+method=auto
+[ipv6]
+method=auto
+NMCONN
+        chmod 600 "/mnt/etc/NetworkManager/system-connections/$WIFI_SSID.nmconnection"
+    fi
+
+    log "Arming first-boot desktop install (autologin on tty1 -> install.sh)."
+    install -d -m755 /mnt/var/lib/enigma
+    touch /mnt/var/lib/enigma/firstboot-pending
+
+    # temporary passwordless sudo so the unattended first boot doesn't stall
+    echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > /mnt/etc/sudoers.d/00-enigma-firstboot
+    chmod 0440 /mnt/etc/sudoers.d/00-enigma-firstboot
+
+    # autologin the user on tty1
+    install -d -m755 /mnt/etc/systemd/system/getty@tty1.service.d
+    cat > /mnt/etc/systemd/system/getty@tty1.service.d/enigma-autologin.conf <<AUTOLOGIN
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I \$TERM
+AUTOLOGIN
+
+    # launcher: fires only for our user, on tty1, while the sentinel exists
+    cat > /mnt/etc/profile.d/zzz-enigma-firstboot.sh <<LAUNCH
+# enigmaOS one-shot desktop install on first boot
+if [ -f /var/lib/enigma/firstboot-pending ] \\
+   && [ "\$(id -un)" = "$USERNAME" ] \\
+   && [ "\$(tty)" = "/dev/tty1" ]; then
+    /usr/local/sbin/enigma-firstboot
+fi
+LAUNCH
+
+    cat > /mnt/usr/local/sbin/enigma-firstboot <<'FIRSTBOOT'
+#!/usr/bin/env bash
+# One-shot: run enigmaOS install.sh on the freshly installed system, then
+# clean up the autologin/sudo scaffolding and reboot into SDDM. Left armed
+# (so a re-login retries) if install.sh fails.
+set -uo pipefail
+echo
+echo "=============================================================="
+echo " enigmaOS: installing the Hyprland desktop layer (first boot)."
+echo " This runs ~/src/enigmaOS/install.sh. Grab a coffee — AUR"
+echo " builds take a while. On success it reboots into the login screen."
+echo "=============================================================="
+echo
+
+echo "[enigma-firstboot] waiting for network ..."
+for _ in $(seq 1 60); do
+    ping -c1 -W1 archlinux.org &>/dev/null && break
+    sleep 2
+done
+if ! ping -c1 -W1 archlinux.org &>/dev/null; then
+    echo "[enigma-firstboot] still offline. Connect (nmtui) then re-login on tty1 to retry."
+    exit 0
+fi
+
+cd "$HOME/src/enigmaOS" || { echo "repo missing at ~/src/enigmaOS"; exit 1; }
+if ./install.sh; then
+    echo "[enigma-firstboot] desktop install complete — cleaning up."
+    sudo rm -f /var/lib/enigma/firstboot-pending
+    sudo rm -f /etc/sudoers.d/00-enigma-firstboot
+    sudo rm -f /etc/profile.d/zzz-enigma-firstboot.sh
+    sudo rm -f /etc/systemd/system/getty@tty1.service.d/enigma-autologin.conf
+    sudo rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
+    echo "[enigma-firstboot] rebooting into SDDM in 5s ..."
+    sleep 5
+    sudo systemctl reboot
+else
+    echo
+    echo "[enigma-firstboot] install.sh FAILED (exit $?)."
+    echo "Fix the issue, then re-run:  cd ~/src/enigmaOS && ./install.sh"
+    echo "Autologin stays on until it succeeds; re-login on tty1 to retry."
+fi
+FIRSTBOOT
+    chmod 0755 /mnt/usr/local/sbin/enigma-firstboot
+}
+
+# ---- main -------------------------------------------------------------------
+WIFI_SSID=""; WIFI_PSK=""; ENCRYPT=0
+banner
+ensure_network
+choose_disk
+gather
+do_disk
+do_pacstrap
+configure_system
+deploy_repo_and_firstboot
+
+umount -R /mnt 2>/dev/null || true
+echo
+ok "Base install done. Remove the USB and reboot."
+[[ "$ENCRYPT" == 1 ]] && ok "At boot you'll be prompted for the LUKS passphrase to unlock the disk."
+ok "Then it auto-logs in on tty1 and installs the Hyprland desktop,"
+ok "and reboots into the SDDM login screen. Pick the 'Hyprland (uwsm)' session."
+echo
+read -rp "Reboot now? [y/N] " r
+[[ "${r,,}" == y* ]] && systemctl reboot
