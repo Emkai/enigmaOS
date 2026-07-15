@@ -8,13 +8,16 @@ prompt and no GitHub auth needed on the target.
 
 ```sh
 # 1. Build the ISO (on any Arch box; installs `archiso` if missing)
-./iso/build-iso.sh
+make iso                      # or: ./iso/build-iso.sh
 
 # 2. Write it to a USB stick (lists disks, makes you confirm)
-./iso/flash-usb.sh            # or: ./iso/flash-usb.sh iso/out/enigmaos-*.iso
+make flash                    # or: ./iso/flash-usb.sh [iso/out/enigmaos-*.iso]
 
 # 3. Boot the target machine from the USB (UEFI). The installer auto-runs.
 ```
+
+`make` (run from the repo root) is just a front-end over the two scripts;
+`make help` lists the targets, and `make clean` removes the build artifacts.
 
 ## What happens when you boot the USB
 
