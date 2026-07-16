@@ -28,9 +28,10 @@ TPM_PCRS="7"
 REPO_SRC="/usr/local/share/enigmaOS.tar.gz"
 # -----------------------------------------------------------------------------
 
-c_blue=$'\033[1;34m'; c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_rst=$'\033[0m'
+c_blue=$'\033[1;34m'; c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_ylw=$'\033[1;33m'; c_rst=$'\033[0m'
 log()  { printf '%s[enigma-install]%s %s\n' "$c_blue" "$c_rst" "$*"; }
 ok()   { printf '%s[enigma-install]%s %s\n' "$c_grn" "$c_rst" "$*"; }
+warn() { printf '%s[enigma-install] WARNING:%s %s\n' "$c_ylw" "$c_rst" "$*" >&2; }
 die()  { printf '%s[enigma-install] ERROR:%s %s\n' "$c_red" "$c_rst" "$*" >&2; exit 1; }
 
 trap 'die "aborted at line $LINENO. If partitioning had already started, the target disk may be in a half-written state — just re-run and it repartitions from scratch."' ERR
@@ -87,16 +88,23 @@ ensure_network() {
         break
     done
     [[ -n "$dev" ]] || die "no Wi-Fi interface found (none of /sys/class/net/*/wireless exist)."
-    log "Scanning on $dev ..."
-    iwctl station "$dev" scan; sleep 2
-    iwctl station "$dev" get-networks
-    read -rp "SSID: " ssid
-    read -rsp "Passphrase: " pass; echo
-    iwctl --passphrase "$pass" station "$dev" connect "$ssid" \
-        || die "Wi-Fi connect failed."
-    log "Waiting for connectivity ..."
-    local i; for i in {1..20}; do ping -c1 -W1 archlinux.org &>/dev/null && break; sleep 1; done
-    ping -c1 -W2 archlinux.org &>/dev/null || die "connected to Wi-Fi but still no internet."
+    local i
+    while :; do
+        log "Scanning on $dev ..."
+        iwctl station "$dev" scan || warn "scan failed — the network list below may be stale."
+        sleep 2
+        iwctl station "$dev" get-networks || true
+        read -rp "SSID: " ssid
+        read -rsp "Passphrase: " pass; echo
+        if ! iwctl --passphrase "$pass" station "$dev" connect "$ssid"; then
+            warn "Wi-Fi connect failed (wrong SSID or passphrase?) — let's try again. Ctrl-C to bail."
+            continue
+        fi
+        log "Waiting for connectivity ..."
+        for i in {1..20}; do ping -c1 -W1 archlinux.org &>/dev/null && break; sleep 1; done
+        ping -c1 -W2 archlinux.org &>/dev/null && break
+        warn "Connected to '$ssid' but still no internet — let's try again. Ctrl-C to bail."
+    done
     ok "Wi-Fi connected."
     WIFI_SSID="$ssid"; WIFI_PSK="$pass"   # persisted to the target for first boot
 }
