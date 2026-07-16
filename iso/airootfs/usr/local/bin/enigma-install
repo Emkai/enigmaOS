@@ -183,6 +183,12 @@ do_disk() {
     sgdisk -n1:0:+1GiB -t1:ef00 -c1:EFI \
            -n2:0:0     -t2:8300 -c2:root "$DISK"
     partprobe "$DISK"; sleep 1
+    # A previous install's signatures survive repartitioning (same layout ->
+    # same offsets), and mkfs.ext4 leaves a stale LUKS magic at offset 0
+    # intact — blkid then still calls the partition crypto_LUKS and mount
+    # refuses it. Wipe signatures per-partition; whole-disk wipefs above only
+    # clears the partition table, not what's inside the partitions.
+    wipefs -af "$EFI_PART" "$ROOT_PART"
     mkfs.fat -F32 -n EFI "$EFI_PART"
 
     if [[ "$ENCRYPT" == 1 ]]; then
