@@ -12,4 +12,6 @@ build_dir=$(mktemp -d)
 trap 'rm -rf "$build_dir"' EXIT
 
 git clone https://aur.archlinux.org/yay.git "$build_dir/yay"
+log "Building yay from AUR. The Go compile prints nothing for several minutes — not hung, just quiet."
 (cd "$build_dir/yay" && makepkg -si --noconfirm)
+log "yay built and installed."

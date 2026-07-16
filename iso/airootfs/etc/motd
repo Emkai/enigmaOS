@@ -1,0 +1,4 @@
+enigmaOS live ISO — the guided installer starts automatically on tty1.
+
+Dropped to a shell? Run `enigma-install` to start it again.
+For Wi-Fi from the shell, use iwctl.

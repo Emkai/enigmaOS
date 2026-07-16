@@ -26,6 +26,7 @@ aur_install() {
     [[ -n "$pkgs" ]] || return 0
     command -v yay &>/dev/null || die "yay not found — did stages/00-bootstrap-yay.sh run?"
     log "yay -S --needed: $(basename "$f")"
+    log "(AUR packages compile from source — long silent stretches are normal)"
     # shellcheck disable=SC2086
     yay -S --needed --noconfirm $pkgs
 }

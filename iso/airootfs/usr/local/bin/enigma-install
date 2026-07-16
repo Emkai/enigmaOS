@@ -43,11 +43,23 @@ set -E
 banner() {
     cat <<'EOF'
 
-   ___ _ __ (_) __ _ _ __ ___   __ _
-  / _ \ '_ \| |/ _` | '_ ` _ \ / _` |   Arch + Hyprland, from bare metal.
- |  __/ | | | | (_| | | | | | | (_| |
-  \___|_| |_|_|\__, |_| |_| |_|\__,_|   guided installer
-               |___/
+ .==========================================.
+ |   .----.     .----.     .----.           |
+ |   | I  |     | II |     | V  |   rotors  |
+ |   '----'     '----'     '----'           |
+ |==========================================|
+ |    Q  W  E  R  T  Z  U  I  O             |
+ |     A  S  D  F  G  H  J  K    lampboard  |
+ |      P  Y  X  C  V  B  N  M  L           |
+ |------------------------------------------|
+ |   (Q)(W)(E)(R)(T)(Z)(U)(I)(O)            |
+ |    (A)(S)(D)(F)(G)(H)(J)(K)    keyboard  |
+ |     (P)(Y)(X)(C)(V)(B)(N)(M)(L)          |
+ |==========================================|
+ |   [o-o]  [o-o]  [o-o]  [o-o]  plugboard  |
+ '=========================================='
+    e n i g m a  ::  Arch + Hyprland, from bare metal.
+                     guided installer
 EOF
     echo
     echo "This will ERASE a disk of your choosing and install Arch + enigmaOS."
@@ -314,9 +326,11 @@ TPM_PCRS=$TPM_PCRS
 ENIGMA_USER=$USERNAME
 ENV
 
-    # temporary passwordless sudo so the unattended first boot doesn't stall
-    echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > /mnt/etc/sudoers.d/00-enigma-firstboot
-    chmod 0440 /mnt/etc/sudoers.d/00-enigma-firstboot
+    # temporary passwordless sudo so the unattended first boot doesn't stall.
+    # 'zz-' so it sorts AFTER 10-wheel: sudoers applies the LAST matching
+    # rule, and wheel's passworded rule would otherwise override this one.
+    echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > /mnt/etc/sudoers.d/zz-enigma-firstboot
+    chmod 0440 /mnt/etc/sudoers.d/zz-enigma-firstboot
 
     # autologin the user on tty1
     install -d -m755 /mnt/etc/systemd/system/getty@tty1.service.d
@@ -406,7 +420,7 @@ cd "$ENIGMA_HOME/src/enigmaOS" || { echo "repo missing at $ENIGMA_HOME/src/enigm
 if bash ./install.sh; then
     echo "[enigma-firstboot] desktop install complete — cleaning up."
     sudo rm -f /var/lib/enigma/firstboot-pending
-    sudo rm -f /etc/sudoers.d/00-enigma-firstboot
+    sudo rm -f /etc/sudoers.d/zz-enigma-firstboot /etc/sudoers.d/00-enigma-firstboot
     sudo rm -f /etc/profile.d/zzz-enigma-firstboot.sh
     sudo rm -f /etc/systemd/system/getty@tty1.service.d/enigma-autologin.conf
     sudo rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
