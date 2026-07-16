@@ -27,9 +27,12 @@ xorg-xinit
 wayland-utils
 xdg-desktop-portal-gtk
 xdg-desktop-portal-hyprland
+xdg-user-dirs
 xdg-utils
 qt5-wayland
 qt6-wayland
+# SDDM greeter on-screen keyboard (InputMethod in system/sddm/sddm.conf)
+qt6-virtualkeyboard
 polkit-kde-agent
 ttf-cascadia-mono-nerd
 ttf-roboto

@@ -18,6 +18,8 @@ desktop install for you. See [`iso/README.md`](iso/README.md).
 ## Layout
 
 - `configs/` — GNU Stow dotfiles (hypr, waybar, wofi, dunst, kitty, nvim, tmux, bash).
+- `system/` — system-level config installed outside `$HOME` (SDDM theme
+  activation + patched theme QML), applied by the stages, not stow.
 - `scripts/` — the desktop-facing scripts these configs reference (wofi menus,
   waybar status scripts, monitor switching, the stow helpers, an RDP/VPN
   connection manager, etc). Referenced by absolute path

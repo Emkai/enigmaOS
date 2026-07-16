@@ -350,11 +350,16 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin $USERNAME --noclear %I \$TERM
 AUTOLOGIN
 
-    # launcher: fires only for our user, on tty1, while the sentinel exists
+    # launcher: fires only for our user, on a CONSOLE login on tty1, while the
+    # sentinel exists. The session-type check matters: SDDM's wayland-session
+    # wrapper re-execs bash --login (sourcing /etc/profile.d) and the graphical
+    # session owns tty1, so without it this hijacks every SDDM login and runs
+    # install.sh inside the black screen where the compositor should be.
     cat > /mnt/etc/profile.d/zzz-enigma-firstboot.sh <<LAUNCH
 # enigmaOS one-shot desktop install on first boot
 if [ -f /var/lib/enigma/firstboot-pending ] \\
    && [ "\$(id -un)" = "$USERNAME" ] \\
+   && [ "\${XDG_SESSION_TYPE:-}" = "tty" ] \\
    && [ "\$(tty)" = "/dev/tty1" ]; then
     /usr/local/sbin/enigma-firstboot
 fi
@@ -430,13 +435,15 @@ cd "$ENIGMA_HOME/src/enigmaOS" || { echo "repo missing at $ENIGMA_HOME/src/enigm
 if bash ./install.sh; then
     echo "[enigma-firstboot] desktop install complete — cleaning up."
     sudo rm -f /var/lib/enigma/firstboot-pending
-    sudo rm -f /etc/sudoers.d/zz-enigma-firstboot /etc/sudoers.d/00-enigma-firstboot
     sudo rm -f /etc/profile.d/zzz-enigma-firstboot.sh
     sudo rm -f /etc/systemd/system/getty@tty1.service.d/enigma-autologin.conf
     sudo rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
     echo "[enigma-firstboot] rebooting into SDDM in 5s ..."
     sleep 5
-    sudo systemctl reboot
+    # the sudoers rm deletes our own NOPASSWD rule, so it must come LAST and
+    # the reboot must ride in the same sudo invocation — a later separate
+    # sudo would hang on a password prompt nobody can see
+    sudo sh -c 'rm -f /etc/sudoers.d/zz-enigma-firstboot /etc/sudoers.d/00-enigma-firstboot; systemctl reboot'
 else
     rc=$?
     echo
