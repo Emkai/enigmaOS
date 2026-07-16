@@ -40,10 +40,14 @@ rsync -a "$ISO_DIR/airootfs/" "$PROFILE/airootfs/"
 chmod 0755 "$PROFILE/airootfs/usr/local/bin/enigma-install"
 
 log "Baking the repo snapshot into the live filesystem."
-mkdir -p "$PROFILE/airootfs/usr/local/share/enigmaOS"
-rsync -a --delete \
-    --exclude '/iso/work/' --exclude '/iso/out/' \
-    "$REPO_ROOT/" "$PROFILE/airootfs/usr/local/share/enigmaOS/"
+# A tarball, not a plain tree: mkarchiso copies airootfs with
+# --no-preserve=mode, which strips exec bits off everything not listed in
+# profiledef.sh's file_permissions. Tar keeps the modes intact end-to-end;
+# enigma-install extracts it onto the target.
+mkdir -p "$PROFILE/airootfs/usr/local/share"
+tar -czf "$PROFILE/airootfs/usr/local/share/enigmaOS.tar.gz" \
+    --exclude './iso/work' --exclude './iso/out' \
+    -C "$REPO_ROOT" .
 
 # mkarchiso honours a file_permissions map in profiledef.sh; make sure our
 # executables land with the right mode regardless of the host umask.

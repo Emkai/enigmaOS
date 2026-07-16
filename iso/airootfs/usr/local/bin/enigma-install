@@ -23,8 +23,9 @@ BASE_PACKAGES=(base linux linux-firmware sudo networkmanager git base-devel stow
 # state — the most update-stable choice; adds modest tamper-evidence without
 # breaking on every kernel/firmware bump. Set empty for none (PIN + TPM only).
 TPM_PCRS="7"
-# Where build-iso.sh baked this repo into the live filesystem.
-REPO_SRC="/usr/local/share/enigmaOS"
+# Where build-iso.sh baked this repo into the live filesystem (a tarball,
+# because mkarchiso strips file modes off plain airootfs trees).
+REPO_SRC="/usr/local/share/enigmaOS.tar.gz"
 # -----------------------------------------------------------------------------
 
 c_blue=$'\033[1;34m'; c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_rst=$'\033[0m'
@@ -37,7 +38,7 @@ set -E
 
 [[ $EUID -eq 0 ]] || die "run as root (you should already be root in the live ISO)."
 [[ -d /sys/firmware/efi/efivars ]] || die "not booted in UEFI mode. Reboot the USB in UEFI (disable CSM/Legacy)."
-[[ -d "$REPO_SRC" ]] || die "baked repo missing at $REPO_SRC — was this ISO built with build-iso.sh?"
+[[ -f "$REPO_SRC" ]] || die "baked repo missing at $REPO_SRC — was this ISO built with build-iso.sh?"
 
 banner() {
     cat <<'EOF'
@@ -269,9 +270,9 @@ CHROOT
 # ---- 5. Ship the repo + arm the first-boot desktop install ------------------
 deploy_repo_and_firstboot() {
     local home="/mnt/home/$USERNAME"
-    log "Copying enigmaOS repo -> ~$USERNAME/src/enigmaOS"
-    install -d "$home/src"
-    cp -a "$REPO_SRC" "$home/src/enigmaOS"
+    log "Extracting enigmaOS repo -> ~$USERNAME/src/enigmaOS"
+    install -d "$home/src/enigmaOS"
+    tar -xzf "$REPO_SRC" -C "$home/src/enigmaOS"
 
     # skel ships .bashrc/.bash_profile; enigmaOS stows its own .bashrc, so a
     # pre-existing one makes stow abort. Clear the skel defaults for a clean
@@ -310,6 +311,7 @@ NMCONN
     cat > /mnt/var/lib/enigma/firstboot.env <<ENV
 TPM_ENROLL=${TPM_ENROLL:-0}
 TPM_PCRS=$TPM_PCRS
+ENIGMA_USER=$USERNAME
 ENV
 
     # temporary passwordless sudo so the unattended first boot doesn't stall
@@ -340,6 +342,20 @@ LAUNCH
 # clean up the autologin/sudo scaffolding and reboot into SDDM. Left armed
 # (so a re-login retries) if install.sh fails.
 set -uo pipefail
+
+[ -f /var/lib/enigma/firstboot.env ] && . /var/lib/enigma/firstboot.env
+ENIGMA_USER="${ENIGMA_USER:-$(id -un)}"
+ENIGMA_HOME=$(getent passwd "$ENIGMA_USER" | cut -d: -f6)
+
+# Retried with sudo? Re-run as the real user so the repo path resolves and
+# AUR builds don't run as root. (No login shell here — that would re-trigger
+# the profile.d launcher and run this script twice.)
+if [ "$(id -u)" -eq 0 ] && [ "$ENIGMA_USER" != root ]; then
+    echo "[enigma-firstboot] running as root — re-running as $ENIGMA_USER."
+    exec runuser -u "$ENIGMA_USER" -- env HOME="$ENIGMA_HOME" \
+        USER="$ENIGMA_USER" LOGNAME="$ENIGMA_USER" /usr/local/sbin/enigma-firstboot
+fi
+
 echo
 echo "=============================================================="
 echo " enigmaOS: installing the Hyprland desktop layer (first boot)."
@@ -360,7 +376,6 @@ fi
 
 # --- TPM2 + PIN enrollment (done here, on the real boot, so the PCR values
 # match the installed system; the passphrase set at install stays as recovery)
-[ -f /var/lib/enigma/firstboot.env ] && . /var/lib/enigma/firstboot.env
 if [ "${TPM_ENROLL:-0}" = 1 ]; then
     backing=$(sudo cryptsetup status cryptroot 2>/dev/null | awk '/device:/{print $2}')
     if [ ! -e /sys/class/tpm/tpm0 ]; then
@@ -386,8 +401,9 @@ if [ "${TPM_ENROLL:-0}" = 1 ]; then
     fi
 fi
 
-cd "$HOME/src/enigmaOS" || { echo "repo missing at ~/src/enigmaOS"; exit 1; }
-if ./install.sh; then
+cd "$ENIGMA_HOME/src/enigmaOS" || { echo "repo missing at $ENIGMA_HOME/src/enigmaOS"; exit 1; }
+# bash, not ./: immune to a lost exec bit on the copied repo
+if bash ./install.sh; then
     echo "[enigma-firstboot] desktop install complete — cleaning up."
     sudo rm -f /var/lib/enigma/firstboot-pending
     sudo rm -f /etc/sudoers.d/00-enigma-firstboot
@@ -401,7 +417,7 @@ else
     rc=$?
     echo
     echo "[enigma-firstboot] install.sh FAILED (exit $rc)."
-    echo "Fix the issue, then re-run:  cd ~/src/enigmaOS && ./install.sh"
+    echo "Fix the issue, then re-run:  cd ~/src/enigmaOS && bash install.sh"
     echo "Autologin stays on until it succeeds; re-login on tty1 to retry."
 fi
 FIRSTBOOT
