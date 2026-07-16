@@ -1,0 +1,57 @@
+# Active KDE color scheme, mirrored from
+# .local/share/color-schemes/TokyoNight.colors. KDE apps (Dolphin) read
+# their startup palette from here; without it they fall back to a light
+# default until the scheme is re-applied by hand. This is what
+# plasma-apply-colorscheme would generate in a full Plasma session.
+[General]
+ColorScheme=TokyoNight
+
+[Icons]
+Theme=breeze-dark
+
+[ColorEffects:Disabled]
+Color=112,111,110
+ColorAmount=0
+ColorEffect=0
+ContrastAmount=0.65
+ContrastEffect=0
+IntensityAmount=0.1
+IntensityEffect=0
+
+[ColorEffects:Inactive]
+ChangeSelectionColor=true
+Enable=false
+
+[Colors:View]
+BackgroundNormal=26,27,38
+BackgroundAlternate=22,22,30
+ForegroundNormal=192,202,245
+ForegroundInactive=86,95,137
+DecorationFocus=122,162,247
+DecorationHover=122,162,247
+
+[Colors:Window]
+BackgroundNormal=26,27,38
+ForegroundNormal=192,202,245
+
+[Colors:Button]
+BackgroundNormal=36,40,59
+ForegroundNormal=192,202,245
+DecorationFocus=122,162,247
+DecorationHover=122,162,247
+
+[Colors:Selection]
+BackgroundNormal=40,85,119
+ForegroundNormal=255,255,255
+DecorationFocus=122,162,247
+DecorationHover=122,162,247
+
+[Colors:Tooltip]
+BackgroundNormal=34,35,58
+ForegroundNormal=248,248,242
+
+[WM]
+activeBackground=26,27,38
+activeForeground=192,202,245
+inactiveBackground=22,22,30
+inactiveForeground=86,95,137

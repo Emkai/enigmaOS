@@ -85,6 +85,11 @@ p7zip
 unrar
 zip
 
+# XDG application menu definition — without one, kbuildsycoca6 builds an
+# empty app database and Dolphin's Open With / double-click open breaks
+# (see stages/26-xdg-app-menu.sh for the prefix symlink)
+archlinux-xdg-menu
+
 # Dolphin thumbnails (images + video) and Qt6 theming (qt6ct + Kvantum)
 imv
 ffmpegthumbnailer

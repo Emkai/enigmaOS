@@ -1,6 +1,6 @@
 [General]
-Version=202
 GlobalViewProps=true
+Version=202
 
 [KFileDialog Settings]
 Places Icons Auto-resize=false

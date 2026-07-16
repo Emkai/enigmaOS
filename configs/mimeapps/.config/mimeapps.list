@@ -23,6 +23,15 @@ application/vnd.openxmlformats-officedocument.presentationml.presentation=chromi
 application/vnd.ms-excel=chromium.desktop
 application/vnd.ms-powerpoint=chromium.desktop
 
+application/zip=org.kde.ark.desktop
+application/x-7z-compressed=org.kde.ark.desktop
+application/vnd.rar=org.kde.ark.desktop
+application/x-tar=org.kde.ark.desktop
+application/x-compressed-tar=org.kde.ark.desktop
+application/x-bzip-compressed-tar=org.kde.ark.desktop
+application/x-xz-compressed-tar=org.kde.ark.desktop
+application/gzip=org.kde.ark.desktop
+
 text/plain=nvim-kitty.desktop
 text/markdown=nvim-kitty.desktop
 text/x-shellscript=nvim-kitty.desktop
