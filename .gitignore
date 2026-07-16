@@ -1,0 +1,3 @@
+# Per-machine install failure report written by lib/common.sh /
+# stages/90-summary.sh
+.install-failures.tsv

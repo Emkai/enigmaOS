@@ -1,2 +1,3 @@
+# NVIDIA proprietary driver stack (open kernel modules) + PRIME offload
 nvidia-open-dkms
 nvidia-prime

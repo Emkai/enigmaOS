@@ -4,6 +4,25 @@ set -euo pipefail
 ENIGMA_ROOT="${ENIGMA_ROOT:?ENIGMA_ROOT not set - run via install.sh}"
 source "$ENIGMA_ROOT/lib/common.sh"
 
+if [[ -s "$ENIGMA_FAILURES" ]]; then
+    printf '\n\033[1;31m[enigmaOS] Install finished, but some items FAILED:\033[0m\n\n'
+    while IFS=$'\t' read -r item src note; do
+        printf '  \033[1m%s\033[0m  %s\n' "$item" "${src:+[$src]}"
+        printf '      disables: %s\n' "${note:-unknown — see ${src:-the stage log above}}"
+    done < <(sort -u "$ENIGMA_FAILURES")
+    cat <<EOF
+
+  Everything else is installed and configured — the failures above only
+  disable the features listed. Once fixed, retry with:
+      cd $ENIGMA_ROOT && bash install.sh
+  (--needed skips everything already installed, so re-runs are quick.)
+  This report is saved at: $ENIGMA_FAILURES
+
+EOF
+else
+    log "All packages installed and services enabled — no failures."
+fi
+
 cat <<'EOF'
 
 [enigmaOS] Install stages complete. Manual follow-ups:

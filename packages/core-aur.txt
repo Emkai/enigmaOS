@@ -1,11 +1,12 @@
-# Core AUR packages — backs SDDM/GTK theming, screen recording keybind,
-# and the vpn/wireguard menu + waybar status modules used unconditionally.
+# Core AUR packages — every machine gets these. The trailing comment on each
+# package is the feature it backs: the end-of-install failure report prints
+# it when a build breaks, so keep the notes current.
 
-hyprdynamicmonitors-bin
-sddm-silent-theme
-sddm-theme-tokyo-night-git
-tokyonight-gtk-theme-git
-wl-screenrec
-tlp-git
-wireguard-go-git
-openvpn3
+hyprdynamicmonitors-bin     # automatic monitor-profile switching (hypr autostart + prepare service)
+sddm-silent-theme           # the SDDM login theme (login falls back to stock SDDM look)
+sddm-theme-tokyo-night-git  # alternate TokyoNight SDDM theme
+tokyonight-gtk-theme-git    # TokyoNight theming for GTK apps
+wl-screenrec                # screen recording bind (Super+Ctrl+V) + waybar recording indicator
+tlp-git                     # laptop battery/power management (tlp.service)
+wireguard-go-git            # userspace WireGuard backend for wg-quick (vpn menu)
+openvpn3                    # OpenVPN entries in the vpn menu + waybar VPN status

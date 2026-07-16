@@ -1,2 +1,3 @@
+# Nouveau (open NVIDIA) GPU drivers + Vulkan
 xf86-video-nouveau
 vulkan-nouveau

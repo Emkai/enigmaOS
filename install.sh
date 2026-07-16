@@ -21,6 +21,11 @@ done
 
 export ENIGMA_ROOT GPU_VENDORS CPU_VENDOR ENIGMA_EXTRAS
 
+# Package/service failures accumulate in this report (see lib/common.sh) and
+# are printed by the summary stage instead of killing the run. Start a full
+# run with a clean slate; --from resumes keep earlier failures visible.
+[[ -n "$ENIGMA_FROM_STAGE" ]] || : > "$ENIGMA_FAILURES"
+
 # Long stages (AUR builds) outlive sudo's cached credentials, and a password
 # prompt buried mid-build times out after 5 minutes and kills the run. Ask
 # once up front and keep the timestamp fresh. No-op under NOPASSWD.

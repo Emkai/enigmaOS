@@ -10,5 +10,5 @@ systemd-networkd.service
 systemd-network-generator.service
 systemd-resolved.service
 systemd-timesyncd.service
-tlp.service
+tlp.service   # laptop battery/power management (tlp-git, AUR)
 fstrim.timer

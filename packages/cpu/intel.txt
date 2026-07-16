@@ -1,1 +1,1 @@
-intel-ucode
+intel-ucode   # Intel CPU microcode updates loaded at early boot

@@ -2,6 +2,6 @@
 # pipewire.socket / pipewire-pulse.socket / p11-kit-server.socket are pulled
 # in automatically by their owning packages and don't need explicit enabling.
 
-hyprdynamicmonitors-prepare.service
+hyprdynamicmonitors-prepare.service   # monitor-profile switching (hyprdynamicmonitors-bin, AUR)
 wireplumber.service
 xdg-user-dirs.service

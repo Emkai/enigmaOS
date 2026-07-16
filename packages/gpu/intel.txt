@@ -1,3 +1,4 @@
+# Intel GPU drivers — hardware video accel (VA-API) + Vulkan
 intel-media-driver
 libva-intel-driver
 vulkan-intel

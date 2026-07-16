@@ -1,5 +1,5 @@
-spotify
-visual-studio-code-bin
-1password
-tesseract-git
-v4l2-relayd
+spotify                 # Spotify desktop client
+visual-studio-code-bin  # VS Code (official binary build)
+1password               # 1Password desktop app
+tesseract-git           # OCR engine (eng/swe language data comes from extras.txt)
+v4l2-relayd             # virtual camera relay (v4l2 loopback feeding)

@@ -1,1 +1,1 @@
-amd-ucode
+amd-ucode   # AMD CPU microcode updates loaded at early boot
