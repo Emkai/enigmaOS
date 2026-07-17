@@ -69,6 +69,12 @@ kitty
 dolphin
 chromium
 neovim
+# nvim toolchain: the dotfiles' Mason config installs its LSP servers with
+# these on first launch, and nvim-treesitter builds grammars with the CLI
+npm             # bashls, ts_ls, pyright, html/css/json, tailwind, angular LSPs
+go              # gopls + dlv + templ
+dotnet-sdk      # csharp_ls
+tree-sitter-cli # treesitter grammar builds + rest.nvim's tree-sitter-http rock
 tmux
 vim
 nano
