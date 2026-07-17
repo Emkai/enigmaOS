@@ -5,7 +5,7 @@
 ISO_DIR := iso
 ISO ?=
 
-.PHONY: help iso flash clean
+.PHONY: help iso flash clean clean-cache
 
 help: ## Show this help
 	@echo "enigmaOS install media — targets:"
@@ -24,5 +24,8 @@ iso: ## Build the install ISO (installs archiso if needed; needs sudo)
 flash: ## Flash an ISO to USB — newest by default, or ISO=path (destructive; confirms)
 	$(ISO_DIR)/flash-usb.sh $(ISO)
 
-clean: ## Remove build artifacts (iso/work, iso/out)
+clean: ## Remove build artifacts (iso/work, iso/out; keeps the package cache)
 	sudo rm -rf $(ISO_DIR)/work $(ISO_DIR)/out
+
+clean-cache: ## Remove the offline-repo cache (forces re-download + AUR rebuilds)
+	sudo rm -rf $(ISO_DIR)/cache

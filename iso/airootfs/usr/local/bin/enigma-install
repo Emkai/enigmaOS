@@ -26,6 +26,12 @@ TPM_PCRS="7"
 # Where build-iso.sh baked this repo into the live filesystem (a tarball,
 # because mkarchiso strips file modes off plain airootfs trees).
 REPO_SRC="/usr/local/share/enigmaOS.tar.gz"
+# Offline pacman repo baked by build-iso.sh: base-install closure + core.txt +
+# pre-built core-aur.txt. pacstrap prefers it (works with no network at all)
+# and it's copied to the target so the first-boot core stages install from
+# disk. Missing repo -> plain network install, as before.
+OFFLINE_REPO="/usr/local/share/enigma-offline"
+OFFLINE_REPO_NAME="enigma-offline"
 # -----------------------------------------------------------------------------
 
 c_blue=$'\033[1;34m'; c_red=$'\033[1;31m'; c_grn=$'\033[1;32m'; c_ylw=$'\033[1;33m'; c_rst=$'\033[0m'
@@ -70,6 +76,8 @@ EOF
     echo
 }
 
+have_offline_repo() { [[ -f "$OFFLINE_REPO/$OFFLINE_REPO_NAME.db.tar.gz" ]]; }
+
 # ---- 1. Network -------------------------------------------------------------
 ensure_network() {
     if ping -c1 -W2 archlinux.org &>/dev/null; then
@@ -78,7 +86,17 @@ ensure_network() {
     fi
     log "No connectivity yet. Wired connections usually come up on their own."
     read -rp "Configure Wi-Fi now? [Y/n] " a
-    [[ "${a,,}" == n* ]] && { ping -c1 -W2 archlinux.org &>/dev/null || die "still offline; connect a cable or configure Wi-Fi, then re-run: enigma-install"; return; }
+    if [[ "${a,,}" == n* ]]; then
+        ping -c1 -W2 archlinux.org &>/dev/null && return
+        # the baked repo covers the whole base install, so offline is fine
+        # here; the first-boot desktop stage waits for network on its own
+        # (GPU drivers and extras still come from the mirrors).
+        have_offline_repo || die "still offline; connect a cable or configure Wi-Fi, then re-run: enigma-install"
+        warn "no network — continuing with the ISO's offline package repo."
+        warn "First boot waits for connectivity before the desktop install; get the"
+        warn "machine online then (cable or nmtui) and it picks up where it left off."
+        return
+    fi
 
     local dev ssid pass w
     dev=""
@@ -214,8 +232,27 @@ do_disk() {
 do_pacstrap() {
     if grep -qi 'GenuineIntel' /proc/cpuinfo; then UCODE_PKG=intel-ucode; UCODE_IMG=intel-ucode.img
     else UCODE_PKG=amd-ucode; UCODE_IMG=amd-ucode.img; fi
-    log "Installing base system (pacstrap) — this pulls packages over the network."
-    pacstrap -K /mnt "${BASE_PACKAGES[@]}" "$UCODE_PKG"
+    if have_offline_repo; then
+        # Repo-only config: everything pacstrap needs was resolved into the
+        # repo at ISO-build time, and not mixing in live mirrors keeps the
+        # installed versions consistent with each other (and works offline).
+        cat > /tmp/enigma-offline-pacman.conf <<CONF
+[options]
+Architecture = auto
+
+[$OFFLINE_REPO_NAME]
+SigLevel = Optional TrustAll
+Server = file://$OFFLINE_REPO
+CONF
+        log "Installing base system (pacstrap) from the ISO's offline repo."
+        if ! pacstrap -C /tmp/enigma-offline-pacman.conf -K /mnt "${BASE_PACKAGES[@]}" "$UCODE_PKG"; then
+            warn "offline pacstrap failed — falling back to a network install."
+            pacstrap -K /mnt "${BASE_PACKAGES[@]}" "$UCODE_PKG"
+        fi
+    else
+        log "Installing base system (pacstrap) — this pulls packages over the network."
+        pacstrap -K /mnt "${BASE_PACKAGES[@]}" "$UCODE_PKG"
+    fi
     genfstab -U /mnt >> /mnt/etc/fstab
     # give the chroot a resolver for the first-boot/AUR steps that come later
     cp -f /etc/resolv.conf /mnt/etc/resolv.conf 2>/dev/null || true
@@ -295,7 +332,30 @@ CHROOT
     printf '%s:%s\n' "$USERNAME" "$USERPASS" | arch-chroot /mnt chpasswd
 }
 
-# ---- 5. Ship the repo + arm the first-boot desktop install ------------------
+# ---- 5. Ship the offline repo to the target ---------------------------------
+# The first-boot stages install core.txt/core-aur.txt; putting the baked repo
+# on the target disk (registered ahead of core/extra) makes those installs
+# come from disk — no mirror downloads, no AUR compiles for pre-built
+# packages. enigma-firstboot deletes all of it after a successful install.
+deploy_offline_repo() {
+    have_offline_repo || return 0
+    log "Copying the offline package repo -> /var/cache/$OFFLINE_REPO_NAME (a few GB, hang on) ..."
+    cp -a "$OFFLINE_REPO" "/mnt/var/cache/$OFFLINE_REPO_NAME"
+    sed -i "/^\[core\]/i\\
+# >>> $OFFLINE_REPO_NAME (removed automatically after the first-boot install) >>>\\
+[$OFFLINE_REPO_NAME]\\
+SigLevel = Optional TrustAll\\
+Server = file:///var/cache/$OFFLINE_REPO_NAME\\
+# <<< $OFFLINE_REPO_NAME <<<
+" /mnt/etc/pacman.conf
+    # sync the target's dbs now if we're online, so core/extra are usable the
+    # moment first boot starts; offline is fine — firstboot syncs once it has
+    # network.
+    arch-chroot /mnt pacman -Sy &>/dev/null \
+        || warn "could not sync package databases in the target (offline?) — first boot does it."
+}
+
+# ---- 6. Ship the repo + arm the first-boot desktop install ------------------
 deploy_repo_and_firstboot() {
     local home="/mnt/home/$USERNAME"
     log "Extracting enigmaOS repo -> ~$USERNAME/src/enigmaOS"
@@ -409,6 +469,11 @@ if ! ping -c1 -W1 archlinux.org &>/dev/null; then
     exit 0
 fi
 
+# An offline base install leaves core/extra unsynced (pacstrap only saw the
+# baked repo); without this, every pacman -S in the stages errors out on the
+# missing db files. Cheap when already synced.
+sudo pacman -Sy || echo "[enigma-firstboot] pacman -Sy failed — continuing, stages may re-try."
+
 # --- TPM2 + PIN enrollment (done here, on the real boot, so the PCR values
 # match the installed system; the passphrase set at install stays as recovery)
 if [ "${TPM_ENROLL:-0}" = 1 ]; then
@@ -444,6 +509,13 @@ if bash ./install.sh; then
     sudo rm -f /etc/profile.d/zzz-enigma-firstboot.sh
     sudo rm -f /etc/systemd/system/getty@tty1.service.d/enigma-autologin.conf
     sudo rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
+    # drop the offline install repo: its packages are installed now, and a
+    # stale snapshot registered ahead of core/extra would shadow real updates
+    if [ -d /var/cache/enigma-offline ]; then
+        echo "[enigma-firstboot] removing the offline package repo (/var/cache/enigma-offline)."
+        sudo sed -i '/>>> enigma-offline/,/<<< enigma-offline/d' /etc/pacman.conf
+        sudo rm -rf /var/cache/enigma-offline /var/lib/pacman/sync/enigma-offline.db
+    fi
     echo "[enigma-firstboot] rebooting into SDDM in 5s ..."
     sleep 5
     # the sudoers rm deletes our own NOPASSWD rule, so it must come LAST and
@@ -470,6 +542,7 @@ gather
 do_disk
 do_pacstrap
 configure_system
+deploy_offline_repo
 deploy_repo_and_firstboot
 
 umount -R /mnt 2>/dev/null || true

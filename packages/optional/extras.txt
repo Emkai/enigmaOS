@@ -34,7 +34,6 @@ qemu-full
 nvtop
 ollama-cuda
 solaar
-samba
 smartmontools
 socat
 libxcrypt-compat

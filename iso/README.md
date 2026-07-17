@@ -22,16 +22,18 @@ make flash                    # or: ./iso/flash-usb.sh [iso/out/enigmaos-*.iso]
 ## What happens when you boot the USB
 
 1. The live environment auto-launches the **guided installer** on tty1.
-2. It checks you're online (offers a Wi-Fi prompt if not), then asks for:
-   the **target disk** (with a typed `YES` confirmation before wiping),
-   **hostname**, **username**, **password**, whether to **encrypt the disk**
-   (default yes), and whether to **enroll TPM2 + PIN unlock** (default yes —
-   the passphrase you set becomes a recovery key).
+2. It checks you're online (offers a Wi-Fi prompt if not; going without
+   network is fine too — the base install runs entirely from the USB's baked
+   package repo), then asks for: the **target disk** (with a typed `YES`
+   confirmation before wiping), **hostname**, **username**, **password**,
+   whether to **encrypt the disk** (default yes), and whether to **enroll
+   TPM2 + PIN unlock** (default yes — the passphrase you set becomes a
+   recovery key).
 3. It does the base install: GPT partitioning (1 GiB EFI + root), optional
    **LUKS2 encryption of the root partition** on the systemd/`sd-encrypt`
-   initramfs stack, `pacstrap` of a minimal base, systemd-boot, your user
-   with sudo, NetworkManager enabled (Wi-Fi credentials carried over if you
-   used them).
+   initramfs stack, `pacstrap` of a minimal base **from the ISO's offline
+   repo** (network only as a fallback), systemd-boot, your user with sudo,
+   NetworkManager enabled (Wi-Fi credentials carried over if you used them).
 4. It copies this repo to `~/src/enigmaOS` on the new system and arms a
    **one-shot first-boot** step.
 5. Reboot. The first boot unlocks with the **recovery passphrase** (the TPM
@@ -81,10 +83,36 @@ The first-boot `install.sh` finishes the desktop, but the manual follow-ups
 from `stages/90-summary.sh` still apply: GitHub auth + cloning the private
 `scripts` repo, 1Password sign-in, `tailscale up`, VPN/RDP profiles.
 
+## The offline package repo
+
+The build bakes a pacman repo into the ISO holding the **full dependency
+closure** of the base install (both ucodes included), `packages/core.txt`,
+and **pre-built AUR packages** from `packages/core-aur.txt` (plus `yay`
+itself). What that buys:
+
+- `pacstrap` installs from the USB — a base install needs **no network**.
+- The installer copies the repo to `/var/cache/enigma-offline` on the target
+  and registers it ahead of `core`/`extra`, so the first-boot core stages
+  install from disk: no mirror downloads, **no AUR compiles** for anything
+  pre-built. After a successful first-boot install the repo and its
+  `pacman.conf` entry are deleted (a stale snapshot must not shadow updates).
+- First boot still wants network for GPU drivers (`packages/gpu/`), optional
+  tiers, and any AUR package whose pre-build failed at ISO-build time (those
+  fall back to a normal on-target build, with the usual failure report).
+
+Build mechanics: downloads and AUR build results are cached in `iso/cache/`
+and reused across rebuilds — `rm -rf iso/cache/aur` (or `make clean-cache`)
+to force fresh AUR builds, e.g. for `-git` packages you want current.
+`makepkg` may install build dependencies **on the build host** and refuses
+to run as root (run `build-iso.sh` as your normal user; a root run just
+skips the AUR pre-builds). Expect the ISO to come out several GB larger
+than a stock archiso.
+
 ## Notes
 
 - The ISO snapshots the repo **as it is on disk** (uncommitted changes
   included). Rebuild after changing anything you want on the target.
 - **Test in a VM first.** e.g. an OVMF/UEFI QEMU guest with a scratch disk,
   before flashing hardware — the installer erases a real disk.
-- `iso/work/` and `iso/out/` are build artifacts and are git-ignored.
+- `iso/work/` and `iso/out/` are build artifacts and are git-ignored, as is
+  the `iso/cache/` package/AUR-build cache.

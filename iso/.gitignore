@@ -1,3 +1,5 @@
 # archiso build artifacts
 work/
 out/
+# offline-repo package downloads + AUR build results (reused across builds)
+cache/

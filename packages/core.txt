@@ -61,6 +61,7 @@ blueman
 wireguard-tools
 tailscale
 freerdp
+samba          # SMB file sharing / network shares
 brightnessctl
 
 # Terminal / editor / apps used by hypr programs.conf and keybinds
