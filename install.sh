@@ -33,9 +33,16 @@ if ! sudo -n true 2>/dev/null; then
     log "sudo is needed for package installs — asking once up front."
     sudo -v || die "sudo authentication failed"
 fi
-( while sleep 60; do sudo -n -v 2>/dev/null || exit; done ) &
+# `sudo -n true` rather than `sudo -n -v`: any successful sudo refreshes the
+# timestamp, and -v insists on (re)authentication under a mixed NOPASSWD +
+# wheel-with-password sudoers (the firstboot setup), where it fails with -n
+# and silently killed the keepalive.
+( while sleep 60; do sudo -n true 2>/dev/null || exit; done ) &
 sudo_keepalive=$!
-trap 'kill "$sudo_keepalive" 2>/dev/null' EXIT
+# `|| true`: under set -e a failing command in an EXIT trap overrides the
+# script's exit code — a dead keepalive here turned a fully successful run
+# into "exit 1", which firstboot read as failure and kept autologin armed.
+trap 'kill "$sudo_keepalive" 2>/dev/null || true' EXIT
 
 for stage in "$ENIGMA_ROOT"/stages/*.sh; do
     name=$(basename "$stage")

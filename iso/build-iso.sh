@@ -95,7 +95,12 @@ strip_list() { sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d' "$1"; }
 # <name>: reuse a cached build, else clone from the AUR and makepkg. Built
 # packages land in iso/cache/aur/<name>/.
 build_aur_pkg() {
-    local name="$1" dir="$CACHE/aur/$name"
+    # two statements on purpose: in `local a="$1" b="$a"`, bash expands BOTH
+    # words before local runs, so $a in the second would silently grab the
+    # caller's variable of the same name (which once made the cache check
+    # look in the wrong package's dir)
+    local name="$1"
+    local dir="$CACHE/aur/$name"
     if compgen -G "$dir/*.pkg.tar.*" >/dev/null; then
         log "  $name: using cached build."
         return 0
@@ -136,19 +141,6 @@ else
     done < <({ echo yay; strip_list "$REPO_ROOT/packages/core-aur.txt"; })
 fi
 
-# Runtime deps of the pre-built AUR packages must be resolvable offline too.
-for name in "${aur_built[@]}"; do
-    for f in "$CACHE/aur/$name"/*.pkg.tar.*; do
-        [[ "$f" == *.sig ]] && continue
-        while read -r dep; do
-            dep="${dep%%[<>=]*}"
-            [[ -n "$dep" && "$dep" != None ]] && official+=("$dep")
-        done < <(pacman -Qip "$f" 2>/dev/null \
-                 | awk -F' *: *' '/^Depends On/{n=split($2,a," "); for(i=1;i<=n;i++) print a[i]}')
-    done
-done
-mapfile -t official < <(printf '%s\n' "${official[@]}" | sort -u)
-
 # Download against a scratch DB (empty local db -> the FULL closure downloads,
 # not just what this build host happens to be missing) and a pinned
 # core+extra-only config (host's custom repos must not leak into the ISO).
@@ -163,9 +155,50 @@ Include = /etc/pacman.d/mirrorlist
 [extra]
 Include = /etc/pacman.d/mirrorlist
 CONF
+dl() { sudo pacman --config "$WORK/pacman-offline-dl.conf" --dbpath "$PACDB" --cachedir "$CACHE/pkg" --noconfirm "$@"; }
+dl -Sy   # sync the scratch DB now: dep classification below needs -Si lookups
+
+# Runtime deps of the pre-built AUR packages must be resolvable offline too —
+# and some are themselves AUR packages (openvpn3 -> gdbuspp, sddm-silent-theme
+# -> redhat-fonts). Those MUST be pre-built into the repo: on the target,
+# pacman can't fetch them anywhere and yay only AUR-builds deps of AUR
+# targets, not of binary-repo packages, so the parent install just fails.
+# (This never showed on the build host because it already had the AUR deps
+# installed from the original hand-run yay builds — makepkg -s found them.)
+# Classify each dep against core/extra; unknown ones get AUR-built and their
+# own deps join the queue. Classification uses -Sp, not -Si: -Si only knows
+# real package names, while -Sp also resolves `provides` (tlp-git depends on
+# "rfkill", which is a virtual provided by util-linux).
+pkgfile_deps() {
+    pacman -Qip "$1" 2>/dev/null \
+        | awk -F' *: *' '/^Depends On/{n=split($2,a," "); for(i=1;i<=n;i++) print a[i]}'
+}
+queue=( "${aur_built[@]}" )
+checked=" "
+while [[ ${#queue[@]} -gt 0 ]]; do
+    name="${queue[0]}"; queue=( "${queue[@]:1}" )
+    for f in "$CACHE/aur/$name"/*.pkg.tar.*; do
+        [[ "$f" == *.sig ]] && continue
+        while read -r dep; do
+            dep="${dep%%[<>=]*}"
+            [[ -n "$dep" && "$dep" != None ]] || continue
+            [[ "$checked" == *" $dep "* ]] && continue
+            checked+="$dep "
+            if dl -Sp "$dep" &>/dev/null; then
+                official+=("$dep")
+            elif build_aur_pkg "$dep" </dev/null; then
+                log "  $dep: AUR dependency baked into the offline repo."
+                aur_built+=("$dep")
+                queue+=("$dep")
+            else
+                log "  WARNING: dep '$dep' is neither in core/extra nor buildable from the AUR — left to the target install."
+            fi
+        done < <(pkgfile_deps "$f")
+    done
+done
+mapfile -t official < <(printf '%s\n' "${official[@]}" | sort -u)
 
 log "Downloading ${#official[@]} packages + dependencies -> iso/cache/pkg (needs sudo) ..."
-dl() { sudo pacman --config "$WORK/pacman-offline-dl.conf" --dbpath "$PACDB" --cachedir "$CACHE/pkg" --noconfirm "$@"; }
 if ! dl -Syw "${official[@]}"; then
     # one bad name aborts the whole transaction; retry one at a time so an
     # AUR dep that isn't an official package just gets skipped
@@ -186,6 +219,12 @@ while read -r url; do
     ln "$f" "$OFFLINE_DIR/" 2>/dev/null || cp "$f" "$OFFLINE_DIR/"
 done < <(dl -Sp "${official[@]}" 2>/dev/null)
 for name in "${aur_built[@]}"; do
+    # belt-and-braces: a bookkeeping bug upstream of here must degrade to a
+    # skipped package (it builds on the target instead), not kill the build
+    if ! compgen -G "$CACHE/aur/$name/*.pkg.tar.*" >/dev/null; then
+        log "  WARNING: no built package files for '$name' — skipped."
+        continue
+    fi
     for f in "$CACHE/aur/$name"/*.pkg.tar.*; do
         [[ "$f" == *.sig ]] && continue
         ln "$f" "$OFFLINE_DIR/" 2>/dev/null || cp "$f" "$OFFLINE_DIR/"
