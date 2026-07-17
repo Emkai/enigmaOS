@@ -24,6 +24,11 @@ STAMP="$(date +%Y.%m.%d)"
 # pre-built core-aur.txt packages. pacstrap and the first-boot stages install
 # from it instead of the network. Name must match what enigma-install expects.
 OFFLINE_REPO_NAME="enigma-offline"
+# NETBOOT=1 additionally exports HTTP-netboot artifacts (out/arch/: kernel,
+# initramfs, airootfs.sfs) from the same run — mkarchiso builds the squashfs
+# once and shares it between the two modes, so this is nearly free.
+BUILDMODES="iso"
+[[ "${NETBOOT:-0}" == 1 ]] && BUILDMODES="iso netboot"
 
 log() { printf '\033[1;34m[build-iso]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[build-iso] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -196,9 +201,13 @@ sed -i "s/^airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' '
     "$PROFILE/profiledef.sh"
 
 log "Running mkarchiso (this takes a few minutes and needs sudo) ..."
-sudo mkarchiso -v -w "$WORK/mkarchiso" -o "$OUT" "$PROFILE"
+sudo mkarchiso -v -m "$BUILDMODES" -w "$WORK/mkarchiso" -o "$OUT" "$PROFILE"
 
 iso_path="$(ls -t "$OUT"/*.iso 2>/dev/null | head -1)"
 [[ -n "$iso_path" ]] || die "mkarchiso finished but no .iso appeared in $OUT."
 log "Done: $iso_path"
 log "Flash it:  ./iso/flash-usb.sh \"$iso_path\""
+if [[ "${NETBOOT:-0}" == 1 ]]; then
+    [[ -d "$OUT/arch" ]] || die "netboot mode ran but no tree appeared at $OUT/arch."
+    log "Netboot tree: $OUT/arch ($(du -sh "$OUT/arch" | cut -f1)) — push it:  make deploy"
+fi

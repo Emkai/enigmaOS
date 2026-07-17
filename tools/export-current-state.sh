@@ -26,6 +26,6 @@ Diff against the curated tier files to spot new/removed packages, e.g.:
   comm -23 <(sort $pkg_out/native-explicit.txt) \\
            <(cat "$ENIGMA_ROOT"/packages/core.txt "$ENIGMA_ROOT"/packages/cpu/*.txt \\
                  "$ENIGMA_ROOT"/packages/gpu/*.txt "$ENIGMA_ROOT"/packages/optional/*.txt \\
-             2>/dev/null | grep -vE '^\\s*#|^\\s*\$' | sort -u)
+             2>/dev/null | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*\$/d' | sort -u)
 Re-file anything new into the appropriate packages/*.txt by hand.
 EOF
