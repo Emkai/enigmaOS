@@ -38,7 +38,7 @@ rdp_connection_submenu() {
     [[ -n "$domain" ]] && info="$info  [$domain]"
 
     while true; do
-        options="$info\n$divider\n$connect_label\n$remove_label\n$divider\n$goback\n$doexit"
+        options="$connect_label\n$remove_label\n$divider\n$info\n$divider\n$goback\n$doexit"
         chosen="$(wofi_menu "$name" "$options")"
 
         case $chosen in

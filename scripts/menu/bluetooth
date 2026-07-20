@@ -186,13 +186,13 @@ bluetooth_device_menu() {
 
     # Build options
     if bluetooth_device_connected $mac; then
-        connected="Connected: yes"
+        conn_action="Disconnect"
     else
-        connected="Connected: no"
+        conn_action="Connect"
     fi
     paired=$(bluetooth_device_paired $mac)
     trusted=$(bluetooth_device_trusted $mac)
-    options="$connected\n$paired\n$trusted\n$divider\n$goback\n$doexit"
+    options="$conn_action\n$paired\n$trusted\n$divider\n$goback\n$doexit"
 
     chosen="$(wofi_menu "$device_name" "$options")"
 
@@ -200,7 +200,7 @@ bluetooth_device_menu() {
     case $chosen in
         $divider)
             ;;
-        $connected)
+        $conn_action)
             bluetooth_toggle_connection $mac
             ;;
         $paired)

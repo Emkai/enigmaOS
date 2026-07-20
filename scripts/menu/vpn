@@ -305,18 +305,16 @@ tailscale_menu() {
     esac
 
     while true; do
-        if ! tailscaled_service_running; then
-            options="$tailscale_start_service_label"
-        else
-            options="$tailscale_stop_service_label"
-        fi
         if tailscaled_service_running; then
-            options="$options\n$tailscale_devices_menu_label"
             if tailscale_connected; then
-                options="$options\n$tailscale_disconnect_label"
+                options="$tailscale_disconnect_label"
             else
-                options="$options\n$tailscale_connect_label"
+                options="$tailscale_connect_label"
             fi
+            options="$options\n$tailscale_devices_menu_label"
+            options="$options\n$tailscale_stop_service_label"
+        else
+            options="$tailscale_start_service_label"
         fi
         options="$options\n$sub_options"
         chosen="$(wofi_menu "Tailscale" "$options")"

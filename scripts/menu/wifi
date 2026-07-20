@@ -120,9 +120,9 @@ wifi_network_menu() {
     fi
     
     if [[ -n "$forget_option" ]]; then
-        options="$connected\n$conn_action\n$saved\n$forget_option\n$divider\n$goback\n$doexit"
+        options="$conn_action\n$connected\n$saved\n$forget_option\n$divider\n$goback\n$doexit"
     else
-        options="$connected\n$conn_action\n$saved\n$divider\n$goback\n$doexit"
+        options="$conn_action\n$connected\n$saved\n$divider\n$goback\n$doexit"
     fi
 
     chosen="$(wofi_menu "$ssid" "$options")"
