@@ -231,7 +231,7 @@ wifi_menu() {
             fi
             
             rescan="Rescan"
-            options="$power\n$current_status\n$network_menu\n$rescan\n$sub_options"
+            options="$network_menu\n$power\n$current_status\n$rescan\n$sub_options"
         else
             power="Power: off"
             options="$power\n$sub_options"
