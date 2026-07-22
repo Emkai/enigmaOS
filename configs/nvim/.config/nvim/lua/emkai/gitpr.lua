@@ -62,10 +62,17 @@ local function truncate(text)
     return text:sub(1, MAX_DIFF_BYTES) .. "\n\n[diff truncated]\n"
 end
 
-local function clean_output(out)
-    out = out:gsub("\n+$", "")
-    out = out:gsub("^```[%w]*\n", ""):gsub("\n```$", "")
-    return vim.trim(out)
+-- Decode the single JSON object the prompts demand (same tolerance as
+-- gitcommit.lua: chatter/code fences around the braces get cut away).
+local function decode_json_object(out)
+    out = vim.trim(out)
+    for _, cand in ipairs({ out, out:match("%b{}"), out:match("(%{.*%})") }) do
+        if cand then
+            local ok, obj = pcall(vim.json.decode, cand)
+            if ok and type(obj) == "table" then return obj end
+        end
+    end
+    return nil
 end
 
 -- Turn user/monday input into a canonical ticket code, or nil if unusable.
@@ -107,14 +114,14 @@ end
 
 -- Ask claude (with monday tools) for a JSON list of the user's open tickets.
 local MONDAY_PROMPT = [[Use the monday.com tools to find my open (not-done) tasks and bugs.
-Return ONLY a JSON array (no prose, no code fences) of up to 25 objects shaped:
-{"key":"TSWENG-1061","name":"short item name","type":"task"}
+Respond with ONLY this JSON object — no prose, no code fences, nothing else:
+{"tickets": [{"key":"TSWENG-1061","name":"short item name","type":"task"}, ...]}
 Rules:
-- tasks use the key prefix TSWENG-, bugs use BSWENG-.
+- up to 25 tickets; tasks use the key prefix TSWENG-, bugs use BSWENG-.
 - the ticket code is usually in the item name or an ID/text column; if an item
   has no such code, set "key" to its numeric monday item id.
 - prefer items assigned to me that are still in progress.
-If you cannot reach monday, return [].]]
+If you cannot reach monday, return {"tickets": []}.]]
 
 -- Prompt for type + number when the user opts to type the ticket in.
 local function enter_manually(cb)
@@ -139,9 +146,8 @@ local function pick_from_monday(cwd, cb)
     ask_claude(MONDAY_PROMPT, cwd, "monday", function(res)
         local items
         if res.code == 0 and res.stdout and res.stdout ~= "" then
-            local json = res.stdout:match("%[.*%]")
-            local ok, parsed = pcall(vim.json.decode, json or "")
-            if ok and type(parsed) == "table" then items = parsed end
+            local obj = decode_json_object(res.stdout)
+            if obj and type(obj.tickets) == "table" then items = obj.tickets end
         end
         if not items or #items == 0 then
             vim.notify("No monday tickets found — enter manually", vim.log.levels.WARN)
@@ -171,10 +177,10 @@ local function build_pr_prompt(key, base, log, diff)
     return table.concat({
         "Draft a GitHub pull request for the branch changes below.",
         "Base your answer ONLY on the commits and diff; do not run any commands.",
-        "Output raw text (no code fences), exactly:",
-        "  Line 1: a concise imperative PR subject (<72 chars). Do NOT include the ticket code.",
-        "  Line 2: blank.",
-        "  Lines 3+: a short markdown body — a one-line summary, then a '## Changes' bullet list.",
+        "Respond with ONLY this JSON object — no prose, no code fences, nothing else:",
+        '{"title": "<concise imperative PR subject, under 72 chars, WITHOUT the ticket code>",',
+        ' "body": "<short markdown body: a one-line summary, then a \'## Changes\' bullet list>"}',
+        "Use \\n for newlines inside the body string.",
         "",
         "Ticket: " .. key,
         "",
@@ -186,12 +192,14 @@ local function build_pr_prompt(key, base, log, diff)
     }, "\n")
 end
 
-local function split_title_body(out)
-    local lines = vim.split(clean_output(out), "\n", { plain = true })
-    local title = vim.trim(lines[1] or "")
-    local body_lines = {}
-    for i = 2, #lines do table.insert(body_lines, lines[i]) end
-    return title, vim.trim(table.concat(body_lines, "\n"))
+-- Pull {title, body} out of the drafting reply; nil title means unusable.
+local function parse_pr_draft(out)
+    local obj = decode_json_object(out)
+    if not obj or type(obj.title) ~= "string" or vim.trim(obj.title) == "" then
+        return nil
+    end
+    local body = type(obj.body) == "string" and vim.trim(obj.body) or ""
+    return vim.trim(obj.title), body
 end
 
 -- Push the branch, then open the PR; copy the resulting URL to the clipboard.
@@ -255,7 +263,11 @@ local function after_ticket(cwd, branch, key)
             return vim.notify("claude failed: " .. (res.stderr or "no output"),
                 vim.log.levels.ERROR)
         end
-        local title, body = split_title_body(res.stdout)
+        local title, body = parse_pr_draft(res.stdout)
+        if not title then
+            return vim.notify("claude reply was not the requested {title, body} JSON",
+                vim.log.levels.ERROR)
+        end
         confirm_and_create(cwd, branch, base, key, enforce_key(title, key), body)
     end)
 end

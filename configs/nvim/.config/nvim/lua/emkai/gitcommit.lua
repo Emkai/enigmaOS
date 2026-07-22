@@ -35,6 +35,9 @@ local function fail_detail(res, elapsed_s)
         or res.signal == 15 or res.signal == 9 then
         return elapsed_s and ("timed out after %ds"):format(elapsed_s) or "timed out"
     end
+    if res.parse_failed then
+        return "reply was not the requested JSON"
+    end
     local detail = vim.trim(res.stderr or "")
     if detail == "" then detail = vim.trim(res.stdout or "") end
     if detail == "" then detail = "no output" end
@@ -42,8 +45,10 @@ local function fail_detail(res, elapsed_s)
 end
 
 -- Run claude in print mode with MCP disabled, feeding `prompt` on stdin.
--- Retries transient failures (non-zero exit or empty output) with exponential
--- backoff; on_result fires once (on success or after the last try). opts.on_retry
+-- Retries transient failures (non-zero exit, empty output, or — when opts.parse
+-- is given — output that doesn't parse) with exponential backoff; on_result
+-- fires once (on success or after the last try). opts.parse(stdout) must return
+-- the extracted value or nil; the value lands in res.parsed. opts.on_retry
 -- (res, failed_attempt, next_attempt) fires before each retry so callers can
 -- surface progress. opts.label tags the operation in the log. Every attempt's
 -- outcome (timing, exit/signal, stderr) is written to LOG_FILE and res.elapsed_s
@@ -65,11 +70,23 @@ local function ask_claude(prompt, cwd, on_result, opts, _attempt)
             res.elapsed_s = math.floor((uv.hrtime() - start) / 1e9 + 0.5)
             vim.schedule(function()
                 local ok = res.code == 0 and res.stdout and res.stdout ~= ""
+                if ok and opts.parse then
+                    res.parsed = opts.parse(res.stdout)
+                    if res.parsed == nil then
+                        ok = false
+                        res.parse_failed = true
+                    end
+                end
                 local stderr = vim.trim(res.stderr or "")
+                local extra = stderr ~= "" and ("\n  stderr: " .. stderr:sub(1, 800)) or ""
+                if res.parse_failed then
+                    extra = extra .. "\n  unparseable stdout: "
+                        .. vim.trim(res.stdout):sub(1, 800)
+                end
                 log_line(("%s attempt %d/%d: %s in %ds (exit=%s signal=%s)%s"):format(
                     label, attempt, MAX_ATTEMPTS,
                     ok and "OK" or "FAIL", res.elapsed_s, res.code, res.signal or 0,
-                    stderr ~= "" and ("\n  stderr: " .. stderr:sub(1, 800)) or ""))
+                    extra))
                 if ok or attempt >= MAX_ATTEMPTS then
                     on_result(res)
                 else
@@ -113,17 +130,48 @@ local function truncate(text)
     return text:sub(1, MAX_DIFF_BYTES) .. "\n\n[diff truncated]\n"
 end
 
-local function clean_output(out)
-    out = out:gsub("\n+$", "")
-    out = out:gsub("^```[%w]*\n", ""):gsub("\n```$", "")
-    return vim.trim(out)
+-- Decode the single JSON object the prompts demand. The model occasionally
+-- wraps it in prose or code fences anyway — the point of asking for JSON is
+-- that such chatter lands OUTSIDE the braces, so we can cut it away instead
+-- of it leaking into the commit message. Try the whole (trimmed) output
+-- first, then the first balanced {...}, then greedily first-{ to last-}.
+local function decode_json_object(out)
+    out = vim.trim(out)
+    for _, cand in ipairs({ out, out:match("%b{}"), out:match("(%{.*%})") }) do
+        if cand then
+            local ok, obj = pcall(vim.json.decode, cand)
+            if ok and type(obj) == "table" then return obj end
+        end
+    end
+    return nil
+end
+
+-- opts.parse for commit-message calls: {message = "..."} or nil.
+local function parse_commit(out)
+    local obj = decode_json_object(out)
+    if not obj or type(obj.message) ~= "string" or vim.trim(obj.message) == "" then
+        return nil
+    end
+    return { message = vim.trim(obj.message) }
+end
+
+-- opts.parse for review calls: {ok = bool, issue = "..."} or nil.
+-- A "not ok" verdict without an issue text is malformed → nil (retries).
+local function parse_review(out)
+    local obj = decode_json_object(out)
+    if not obj or type(obj.ok) ~= "boolean" then return nil end
+    local issue = type(obj.issue) == "string" and vim.trim(obj.issue) or ""
+    if not obj.ok and issue == "" then return nil end
+    return { ok = obj.ok, issue = issue }
 end
 
 local COMMIT_PROMPT = [[Write a git commit message for the staged diff below.
 Base your answer ONLY on this diff; do not run any commands.
-Output ONLY the raw commit message: a concise imperative subject line
-(~72 chars), optionally a blank line and a short body explaining the why.
-No backticks, no preamble, no quotes.
+Respond with ONLY this JSON object — no prose, no code fences, nothing else:
+{"message": "<the commit message>"}
+The message: a concise imperative subject line (~72 chars), optionally
+followed by a blank line and a short body explaining the why. Use \n for
+newlines inside the JSON string.
 
 STAGED DIFF:
 ]]
@@ -137,9 +185,9 @@ Flag ONLY serious issues:
 - Clear mistakes: leftover debug prints, large commented-out blocks, wrong/binary files
 IGNORE formatting, style, naming, missing comments, refactoring opinions.
 Be CONSERVATIVE — false positives are worse than silence.
-Reply with ONE line only:
-- `OK` if no real issues
-- `ISSUE: <under 120 chars>` otherwise
+Respond with ONLY one of these JSON objects — no prose, no code fences:
+{"ok": true}                                 if no real issues
+{"ok": false, "issue": "<under 120 chars>"}  otherwise
 
 COMMIT:
 ]]
@@ -160,14 +208,13 @@ local function review_commit(cwd)
     end
 
     ask_claude(REVIEW_PROMPT .. truncate(show), cwd, function(res)
-        if res.code ~= 0 or not res.stdout or res.stdout == "" then
+        if not res.parsed then
             finish("claude review failed (" .. fail_detail(res, res.elapsed_s)
                 .. ") — :ClaudeCommitLog for details", "WARN", 10000)
             return
         end
-        local issue = vim.trim(res.stdout):match("ISSUE:%s*(.+)")
-        if issue then
-            issue = vim.split(issue, "\n")[1]
+        if not res.parsed.ok then
+            local issue = vim.split(res.parsed.issue, "\n")[1]
             finish("Commit issue: " .. issue, "WARN", 10000)
             vim.fn.system({ "notify-send", "-u", "critical", "Commit Issue", issue })
         else
@@ -175,6 +222,7 @@ local function review_commit(cwd)
         end
     end, {
         label = "review",
+        parse = parse_review,
         -- Show each retry in place, including why the previous attempt failed.
         on_retry = function(res, failed, next_attempt)
             MiniNotify.update(id, {
@@ -235,7 +283,7 @@ vim.api.nvim_create_autocmd("FileType", {
                     pcall(MiniNotify.remove, id)
                     return
                 end
-                if res.code ~= 0 or not res.stdout or res.stdout == "" then
+                if not res.parsed then
                     finish("commit message failed (" .. fail_detail(res, res.elapsed_s)
                         .. ") — :ClaudeCommitLog for details", "WARN", 10000)
                     return
@@ -244,11 +292,12 @@ vim.api.nvim_create_autocmd("FileType", {
                     pcall(MiniNotify.remove, id) -- user typed their own; step aside
                     return
                 end
-                local lines = vim.split(clean_output(res.stdout), "\n", { plain = true })
+                local lines = vim.split(res.parsed.message, "\n", { plain = true })
                 vim.api.nvim_buf_set_lines(buf, 0, 0, false, lines)
                 finish("Commit message generated", "INFO", 3000)
             end, {
                 label = "commit-msg",
+                parse = parse_commit,
                 -- Show each retry in place, including why the previous attempt failed.
                 on_retry = function(res, failed, next_attempt)
                     MiniNotify.update(id, {
