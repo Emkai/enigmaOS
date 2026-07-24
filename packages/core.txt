@@ -21,6 +21,8 @@ dunst
 sddm
 grim
 slurp
+satty          # screenshot annotation (hyprshot --raw pipes into it)
+wl-clipboard   # wl-copy — satty's copy-to-clipboard command
 nwg-look
 xorg-server
 xorg-xinit
