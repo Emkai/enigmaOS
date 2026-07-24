@@ -1,6 +1,6 @@
 require('nvim-treesitter').install({
     'c', 'bash', 'go', 'lua', 'vim', 'vimdoc', 'query',
-    'markdown', 'markdown_inline', 'http',
+    'markdown', 'markdown_inline', 'http', 'diff',
 })
 
 vim.api.nvim_create_autocmd('FileType', {
