@@ -14,11 +14,11 @@ vim.keymap.set("n", "<A-k>", "<cmd>bnext<CR>", { desc = "next buffer" })
 vim.keymap.set("n", "<A-j>", "<cmd>bprev<CR>", { desc = "previous buffer" })
 vim.keymap.set("n", "<A-w>", "<cmd>bdelete<CR>", { desc = "delete buffer" })
 
-vim.keymap.set("n", "<A-S-w>", "<cmd>tabclose<CR>", { desc = "close tab" })
-vim.keymap.set("n", "<A-S-k>", "<cmd>silent! +tabmove<CR>", { desc = "move tab right" })
-vim.keymap.set("n", "<A-S-j>", "<cmd>silent! -tabmove<CR>", { desc = "move tab left" })
-vim.keymap.set("n", "<A-S-l>", "<cmd>silent! +tabmove<CR>", { desc = "move tab right" })
-vim.keymap.set("n", "<A-S-h>", "<cmd>silent! -tabmove<CR>", { desc = "move tab left" })
+vim.keymap.set("n", "<C-A-w>", "<cmd>tabclose<CR>", { desc = "close tab" })
+vim.keymap.set("n", "<C-A-k>", "<cmd>tabnext<CR>", { desc = "next tab" })
+vim.keymap.set("n", "<C-A-j>", "<cmd>tabprevious<CR>", { desc = "previous tab" })
+vim.keymap.set("n", "<C-A-l>", "<cmd>tabnext<CR>", { desc = "next tab" })
+vim.keymap.set("n", "<C-A-h>", "<cmd>tabprevious<CR>", { desc = "previous tab" })
 
 -- workspace diagnostics
 vim.api.nvim_set_keymap("n", "<leader>x", "", {
