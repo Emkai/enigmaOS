@@ -431,6 +431,24 @@ function M.detect_workspace_root()
     return nil
 end
 
+-- Publish dirs are reused between builds for speed, but stale files survive in
+-- them (the publish copy is timestamp-based). Run this when switching arch or
+-- when a deployed container crashes loading a native lib.
+function M.clean()
+    local repo = M.detect_repo()
+    if repo ~= "bms" then
+        notify_err("Clean: not in a bms repo")
+        return
+    end
+    local cwd = vim.fn.getcwd()
+    local cmd = string.format(
+        "%s/clean_bms.sh -s %s",
+        SCRIPTS_DIR,
+        vim.fn.shellescape(cwd .. "/EBMS")
+    )
+    M.run_in_float(cmd)
+end
+
 function M.generate_embedded()
     local repo = M.detect_repo()
     if repo ~= "bms" and repo ~= "escu" then
@@ -565,6 +583,7 @@ end
 M.keymaps = {
     { lhs = "eb", fn = M.build,                 repos = { "bms", "escu", "sil" }, desc = "Echandia build" },
     { lhs = "eB", fn = M.set_build_mode,        repos = { "bms", "escu", "sil" }, desc = "Echandia set build mode" },
+    { lhs = "ec", fn = M.clean,                 repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
     { lhs = "ed", fn = M.deploy,                repos = { "bms", "escu" },        desc = "Echandia deploy" },
     { lhs = "el", fn = M.launch,                repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
     { lhs = "eg", fn = M.generate_embedded,     repos = { "bms", "escu" },        desc = "Echandia generate embedded" },
