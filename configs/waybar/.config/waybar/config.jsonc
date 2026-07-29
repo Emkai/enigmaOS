@@ -9,7 +9,7 @@
     "modules-center": [
         "cpu",
         "hyprland/workspaces",
-        "memory"
+        "custom/memory"
     ],
     "modules-right": [
         "custom/spacer",
@@ -28,10 +28,12 @@
         "interval": 2,
         "format": "{usage}%  "
     },
-    "memory": {
-        "format": "{used} GiB",
-        "format-unknown": "",
-        "interval": 2
+    "custom/memory": {
+        "exec": "~/src/enigmaOS/scripts/waybar/memory-status.sh",
+        "return-type": "json",
+        "interval": 2,
+        "format": "{}",
+        "tooltip": true
     },
     "custom/spacer": {
         "format": " ",
