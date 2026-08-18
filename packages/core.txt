@@ -23,6 +23,7 @@ grim
 slurp
 satty          # screenshot annotation (hyprshot --raw pipes into it)
 wl-clipboard   # wl-copy — satty's copy-to-clipboard command
+wtype          # types text into the focused window — used by scripts/dictate
 nwg-look
 xorg-server
 xorg-xinit
@@ -54,7 +55,6 @@ libpulse
 networkmanager
 network-manager-applet
 iwd
-wpa_supplicant
 wireless_tools
 systemd-resolvconf
 bluez

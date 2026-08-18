@@ -35,3 +35,5 @@ PATH=$PATH:~/src/scripts/linux/work/creekside
 PATH=$PATH:~/go/bin
 export PATH="$HOME/.local/bin:$PATH"
 export EDITOR=nvim
+
+export LD_LIBRARY_PATH="$HOME/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3.14/site-packages/nvidia/cublas/lib:$HOME/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3.14/site-packages/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

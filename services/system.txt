@@ -6,8 +6,6 @@ NetworkManager.service
 NetworkManager-dispatcher.service
 NetworkManager-wait-online.service
 sddm.service
-systemd-networkd.service
-systemd-network-generator.service
 systemd-resolved.service
 systemd-timesyncd.service
 tlp.service   # laptop battery/power management (tlp-git, AUR)

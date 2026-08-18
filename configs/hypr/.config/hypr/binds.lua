@@ -26,6 +26,10 @@ hl.bind(mainMod .. " + CTRL + K", hl.dsp.exec_cmd('hyprshot -m region -o ~/Pictu
 hl.bind(mainMod .. " + CTRL + SHIFT + K", hl.dsp.exec_cmd("hyprshot -m region --raw | satty --filename - --output-filename ~/Pictures/screenshots/%Y-%m-%d-%H%M%S_satty.png --early-exit --copy-command wl-copy"))
 hl.bind(mainMod .. " + CTRL + V", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/screen-recording.sh"))
 
+-- Dictation: press to start recording, press again to transcribe and type
+-- the result into whatever window has focus.
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/dictate"))
+
 -- Move focus with mainMod + hjkl (intentionally inverted j/k, kept as-is)
 hl.bind(mainMod .. " + h", hl.dsp.focus({ direction = "left" }))
 hl.bind(mainMod .. " + l", hl.dsp.focus({ direction = "right" }))
