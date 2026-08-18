@@ -5,4 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=src/ask.sh
 source "$SCRIPT_DIR/src/ask.sh"
 
+
+gello
+
 ask_main "$@"

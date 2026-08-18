@@ -1,6 +1,8 @@
 #!/bin/bash
 
-VPN_SCRIPT="${VPN_SCRIPT:-$HOME/src/scripts/linux/os/src/vpn.sh}"
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+VPN_SCRIPT="$SCRIPT_DIR/../src/vpn.sh"
 # shellcheck source=/dev/null
 [ -f "$VPN_SCRIPT" ] && source "$VPN_SCRIPT"
 
