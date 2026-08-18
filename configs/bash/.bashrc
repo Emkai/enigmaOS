@@ -36,4 +36,13 @@ PATH=$PATH:~/go/bin
 export PATH="$HOME/.local/bin:$PATH"
 export EDITOR=nvim
 
-export LD_LIBRARY_PATH="$HOME/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3.14/site-packages/nvidia/cublas/lib:$HOME/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3.14/site-packages/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# whisper-ctranslate2 (scripts/stt, packages/optional/dictation.txt) bundles
+# its own cublas/cudnn under the pipx venv's site-packages instead of using a
+# system CUDA install; faster-whisper needs them on LD_LIBRARY_PATH to use
+# the GPU. Globbed so it survives the venv's Python version changing across
+# pipx reinstalls, and silently no-ops if the venv isn't there.
+for _stt_lib in "$HOME"/.local/share/pipx/venvs/whisper-ctranslate2/lib/python3.*/site-packages/nvidia/{cublas,cudnn}/lib; do
+    [[ -d "$_stt_lib" ]] && LD_LIBRARY_PATH="$_stt_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+done
+unset _stt_lib
+export LD_LIBRARY_PATH

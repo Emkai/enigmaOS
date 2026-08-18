@@ -1,0 +1,5 @@
+# Voice dictation (scripts/dictate, scripts/stt): press a bind to record,
+# press again to transcribe locally and type the result into the focused
+# window. whisper-ctranslate2 itself isn't packaged for pacman/AUR — pipx
+# installs it from PyPI in stages/14-dictation.sh, which needs pipx first.
+pipx
