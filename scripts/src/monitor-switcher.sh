@@ -43,31 +43,31 @@ function switch_monitor() {
         if [[ -f "$KEEP_LAPTOP_CACHE" ]]; then
             # Park eDP-1 off-screen first so its prior position can't overlap
             # any external while we recompute the right edge.
-            hyprctl keyword monitor "eDP-1,3200x2000@120,20000x0,2"
+            hyprctl eval "hl.monitor({ output = 'eDP-1', mode = '3200x2000@120', position = '20000x0', scale = 2 })"
             local right_edge
             right_edge=$(hyprctl monitors -j | jq '[.[] | select(.name != "eDP-1") | (.x + (.width / .scale))] | max | floor')
-            hyprctl keyword monitor "eDP-1,3200x2000@120,${right_edge}x0,2"
+            hyprctl eval "hl.monitor({ output = 'eDP-1', mode = '3200x2000@120', position = '${right_edge}x0', scale = 2 })"
             action="external+laptop right_edge=$right_edge"
         else
-            hyprctl keyword monitor "eDP-1,disable"
+            hyprctl eval "hl.monitor({ output = 'eDP-1', disabled = true })"
             action="external only (laptop disabled)"
         fi
     else
-        # Re-enable the laptop panel. `hyprctl keyword monitor` cannot revive
+        # Re-enable the laptop panel. A direct monitor modeset cannot revive
         # eDP-1 while Hyprland sits in its headless FALLBACK state (all real
         # outputs just removed): it returns "ok" but the panel stays disabled.
-        # Only `hyprctl reload` — which re-applies monitors.conf's
-        # `monitor=eDP-1,preferred,auto,2` — actually brings the output back.
+        # Only `hyprctl reload` — which re-applies monitors.lua's eDP-1 rule —
+        # actually brings the output back.
         # So: attempt the direct modeset; if eDP-1 is still disabled, reload to
         # wake it, then pin the intended mode/position.
-        hyprctl keyword monitor "eDP-1,3200x2000@120,0x0,2"
+        hyprctl eval "hl.monitor({ output = 'eDP-1', mode = '3200x2000@120', position = '0x0', scale = 2 })"
         sleep 0.5
         local dis
         dis=$(hyprctl monitors all -j | jq -r '.[] | select(.name == "eDP-1") | .disabled')
         if [[ "$dis" != "false" ]]; then
             hyprctl reload
             sleep 0.5
-            hyprctl keyword monitor "eDP-1,3200x2000@120,0x0,2"
+            hyprctl eval "hl.monitor({ output = 'eDP-1', mode = '3200x2000@120', position = '0x0', scale = 2 })"
             action="laptop only (via reload)"
         else
             action="laptop only"

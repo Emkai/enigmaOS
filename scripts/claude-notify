@@ -29,7 +29,7 @@ done
 
         if [[ "$action" == "switch" ]]; then
             tmux switch-client -t "$TMUX_TARGET" 2>/dev/null || true
-            hyprctl dispatch focuswindow kitty 2>/dev/null || true
+            hyprctl dispatch 'hl.dsp.focus({ window = "class:kitty" })' 2>/dev/null || true
         fi
     else
         # Fallback: not in tmux, plain notification

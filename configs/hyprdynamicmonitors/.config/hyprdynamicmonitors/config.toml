@@ -5,7 +5,7 @@
 # Where the active profile's layout is written; required by hyprland.lua.
 destination = "$HOME/.config/hypr/monitors.lua"
 # Hyprland 0.55 won't re-power eDP-1 leaving the all-outputs-removed state via
-# IPC alone; a `hyprctl reload` (re-reading the freshly written monitors.conf)
+# IPC alone; a `hyprctl reload` (re-reading the freshly written monitors.lua)
 # is the proven fix, so force it after every profile switch.
 post_apply_exec = "hyprctl reload"
 

@@ -30,8 +30,8 @@ echo "Swapping: $left_name <-> $right_name"
 
 # Park the left monitor far off-screen first to avoid a transient overlap
 # warning while the right monitor is being repositioned to x=0.
-hyprctl keyword monitor "$left_name,${left_w}x${left_h}@${left_rate},20000x0,${left_scale}"
-hyprctl keyword monitor "$right_name,${right_w}x${right_h}@${right_rate},0x0,${right_scale}"
-hyprctl keyword monitor "$left_name,${left_w}x${left_h}@${left_rate},${new_left_x}x0,${left_scale}"
+hyprctl eval "hl.monitor({ output = '$left_name', mode = '${left_w}x${left_h}@${left_rate}', position = '20000x0', scale = $left_scale })"
+hyprctl eval "hl.monitor({ output = '$right_name', mode = '${right_w}x${right_h}@${right_rate}', position = '0x0', scale = $right_scale })"
+hyprctl eval "hl.monitor({ output = '$left_name', mode = '${left_w}x${left_h}@${left_rate}', position = '${new_left_x}x0', scale = $left_scale })"
 
 echo "Done."
