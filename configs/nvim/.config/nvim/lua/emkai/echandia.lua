@@ -18,6 +18,8 @@ local BUILD_MODES = {
         { key = "sil_and_tools", label = "SIL images + tools" },
         { key = "sil_images",    label = "SIL images only" },
         { key = "tools",         label = "Tools only (ebms/escu/scu generators)" },
+        { key = "bundle",        label = "Release bundle (native arch, .env pins)" },
+        { key = "bundle_local",  label = "Release bundle (fully local: deploy_sil + bundle)" },
     },
 }
 
@@ -91,6 +93,33 @@ function M.set_version()
                 return
             end
             vim.g[varname] = v
+        end
+    )
+end
+
+function M.set_bundle_arch()
+    vim.ui.input(
+        {
+            prompt = "Bundle arch (amd64,arm64,win-amd64 | native | all): ",
+            default = vim.g.echandia_sil_bundle_arch or "all",
+        },
+        function(v)
+            if not v or v == "" then
+                return
+            end
+            vim.g.echandia_sil_bundle_arch = v
+            vim.ui.input(
+                {
+                    prompt = "Local-bundle arch (amd64 | arm64 | native): ",
+                    default = vim.g.echandia_sil_bundle_local_arch or "native",
+                },
+                function(lv)
+                    if not lv or lv == "" then
+                        return
+                    end
+                    vim.g.echandia_sil_bundle_local_arch = lv
+                end
+            )
         end
     )
 end
@@ -320,6 +349,61 @@ function M.build()
             local sil_dir = M.detect_sil_dir()
             local workspace = M.detect_workspace_root()
             local function run(version)
+                -- Release bundle: sil-<version>-<arch>.tar.gz via the sil repo's
+                -- own scripts/build-bundles.sh (bundle_sil.sh wrapper); output
+                -- lands in <workspace>/sil/build/. The password is prompted each
+                -- time and never persisted, matching launch_sil; a remembered
+                -- SCU count is forwarded when set. The arch set is remembered in
+                -- echandia_sil_bundle_arch — bundle_local always builds native
+                -- (locally-built images only exist for the host arch), so it
+                -- skips the arch prompt.
+                if mode == "bundle" or mode == "bundle_local" then
+                    if not workspace then
+                        notify_err("Not in a feature workspace (need bms/, escu/, sil/ siblings)")
+                        return
+                    end
+                    local function run_bundle(arch)
+                        vim.ui.input({ prompt = "Bundle password: " }, function(pw)
+                            if not pw or pw == "" then
+                                return
+                            end
+                            local cmd = string.format(
+                                "%s/bundle_sil.sh -s %s -v %s -P %s -a %s",
+                                SCRIPTS_DIR,
+                                vim.fn.shellescape(workspace),
+                                vim.fn.shellescape(version),
+                                vim.fn.shellescape(pw),
+                                vim.fn.shellescape(arch)
+                            )
+                            local scus = vim.g.echandia_sil_scus
+                            if scus and scus ~= "" then
+                                cmd = cmd .. " -n " .. vim.fn.shellescape(tostring(scus))
+                            end
+                            if mode == "bundle_local" then
+                                cmd = cmd .. " -l"
+                            end
+                            M.run_in_float(cmd)
+                        end)
+                    end
+                    if mode == "bundle_local" then
+                        -- Local images hold one platform per tag, so exactly one
+                        -- arch; cross arches build under QEMU (deploy_sil -a).
+                        M.ensure_var(
+                            "echandia_sil_bundle_local_arch",
+                            "Bundle arch (amd64 | arm64 | native): ",
+                            "native",
+                            run_bundle
+                        )
+                    else
+                        M.ensure_var(
+                            "echandia_sil_bundle_arch",
+                            "Bundle arch (amd64,arm64,win-amd64 | native | all): ",
+                            "all",
+                            run_bundle
+                        )
+                    end
+                    return
+                end
                 -- Full stack: build bms+escu+sil+tools images and pin
                 -- <workspace>/sil/.env to the locally-built images (deploy_sil.sh).
                 if mode == "full_stack" then
@@ -590,6 +674,7 @@ M.keymaps = {
     { lhs = "en", fn = M.generate_nswag,        repos = { "bms" },                desc = "Echandia generate nswag (bms)" },
     { lhs = "et", fn = M.set_target,            repos = { "bms", "escu" },        desc = "Echandia set deploy target (host + arch)" },
     { lhs = "ev", fn = M.set_version,           repos = { "bms", "escu", "sil" }, desc = "Echandia set deploy version" },
+    { lhs = "ea", fn = M.set_bundle_arch,       repos = { "sil" },                desc = "Echandia set bundle arch (sil)" },
     { lhs = "ep", fn = M.set_launch_docker,     repos = { "bms", "escu" },        desc = "Echandia set use docker for launch" },
     { lhs = "eG", fn = M.set_launch_gen_config, repos = { "bms", "escu" },        desc = "Echandia set gen-config on launch" },
 }

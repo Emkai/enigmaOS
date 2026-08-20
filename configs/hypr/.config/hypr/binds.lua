@@ -15,6 +15,7 @@ hl.bind(mainMod .. " + SPACE", hl.dsp.exec_cmd(programs.menu))
 -- hl.bind(mainMod .. " + K", hl.dsp.exec_cmd("cat ~/.config/hypr/help/tmux $dmenu"))
 -- hl.bind(mainMod .. " + SHIFT + K", hl.dsp.exec_cmd("ls ~/ | $dmenu"))
 hl.bind(mainMod .. " + ALT + L", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/wofi-main"))
+hl.bind(mainMod .. " + ALT + O", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/qs-main")) -- quickshell copy of the wofi menus
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo()) -- dwindle
 hl.bind(mainMod .. " + F", hl.dsp.window.fullscreen())
 -- hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit")) -- dwindle
@@ -29,6 +30,11 @@ hl.bind(mainMod .. " + CTRL + V", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/screen
 -- Dictation: press to start recording, press again to transcribe and type
 -- the result into whatever window has focus.
 hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/dictate"))
+
+-- Ask (voice): press to start recording, press again to transcribe, feed the
+-- transcript to `ask -n -M`, and show the answer in a floating popup
+-- (see the "ask-voice-popup" window rule in windows.lua).
+hl.bind(mainMod .. " + A", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/ask-voice"))
 
 -- Move focus with mainMod + hjkl (intentionally inverted j/k, kept as-is)
 hl.bind(mainMod .. " + h", hl.dsp.focus({ direction = "left" }))

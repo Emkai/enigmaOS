@@ -17,6 +17,15 @@ hl.window_rule({
     center = true,
 })
 
+-- Ask (voice) popup: small floating window, centered on screen
+hl.window_rule({
+    name = "ask-voice-popup-float-center",
+    match = { class = "^(ask-voice-popup)$" },
+    float = true,
+    center = true,
+    size = "700 400",
+})
+
 -- Fix some dragging issues with XWayland
 hl.window_rule({
     name = "windowrule-2",

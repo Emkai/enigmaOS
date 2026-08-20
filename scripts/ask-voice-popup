@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Displays a text file in the terminal it's run in and waits for Enter or
+# Esc before exiting. Meant to run inside a small floating kitty window
+# (see ask-voice-popup's window rule in configs/hypr/.config/hypr/windows.lua)
+# spawned by scripts/ask-voice.
+set -euo pipefail
+
+file="${1:?usage: ask-voice-popup <text-file>}"
+
+cat "$file"
+printf '\n\033[2m[Enter or Esc to close]\033[0m'
+
+while IFS= read -rsn1 key; do
+    [[ -z "$key" || "$key" == $'\x1b' ]] && break
+done
