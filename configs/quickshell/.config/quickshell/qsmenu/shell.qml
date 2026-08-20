@@ -1,11 +1,9 @@
 // qsmenu — a wofi-style dmenu replacement rendered by quickshell.
 //
 // One hidden PanelWindow that scripts drive over IPC:
-//   qs -p <this dir> ipc call menu show <prompt> <options> <fifo> <lines> <password>
+//   qs -p <this dir> ipc call menu open <prompt> <options> <fifo> <lines> <password>
 // The selection ("" when dismissed) is written to <fifo> and the window hides
 // again. scripts/qs-main is the only intended caller.
-//
-// Colors mirror scripts/menu/style.css so both menu systems look alike.
 
 import QtQuick
 import Quickshell
@@ -25,11 +23,20 @@ ShellRoot {
     property bool shown: false
 
     readonly property int rowHeight: 32
-    readonly property int inputHeight: 38
-    readonly property color bgColor: "#131215"
-    readonly property color fieldColor: "#22233a"
-    readonly property color textColor: "#f8f8f2"
-    readonly property color accentColor: "#33ccff"
+    readonly property int headerHeight: 44
+    readonly property int footerHeight: 34
+    // The window grows/shrinks with the filtered list; `lines` (wofi's -L) caps it.
+    readonly property int visibleRows: Math.min(filtered.length, lines)
+    readonly property string fontFamily: "CaskaydiaMono Nerd Font"
+
+    readonly property color bgColor: "#0b0e14"
+    readonly property color borderColor: "#8ba7c9"
+    readonly property color accentColor: "#5c9fd8"
+    readonly property color textColor: "#c3cbd8"
+    readonly property color brightColor: "#e8eef6"
+    readonly property color mutedColor: "#5c687a"
+    readonly property color selectedBgColor: "#111a28"
+    readonly property color lineColor: "#1c2432"
 
     // wofi -M fuzzy equivalent: query chars must appear in order, case-insensitive
     function fuzzyMatch(query, entry) {
@@ -128,117 +135,211 @@ ShellRoot {
         WlrLayershell.namespace: "qsmenu"
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
         color: "transparent"
-        implicitWidth: 640
-        implicitHeight: root.inputHeight + root.lines * root.rowHeight + 2
+        implicitWidth: 720
+        implicitHeight: root.headerHeight + root.visibleRows * root.rowHeight + root.footerHeight + 2
 
         onVisibleChanged: if (visible) searchInput.forceActiveFocus()
 
         Rectangle {
             anchors.fill: parent
             color: root.bgColor
+            border.width: 1
+            border.color: root.borderColor
 
-            Column {
-                anchors.fill: parent
+            // ---- Header: prompt · filter input · match counter ----
+            Item {
+                id: header
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.margins: 1
+                height: root.headerHeight
 
-                Rectangle {
-                    width: parent.width
-                    height: root.inputHeight
-                    color: root.fieldColor
+                Text {
+                    id: promptLabel
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 20
+                    text: root.prompt
+                    color: root.accentColor
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                    font.bold: true
+                }
 
-                    Rectangle {
+                Text {
+                    id: counter
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: 20
+                    visible: root.allOptions.length > 0
+                    text: root.filtered.length + "/" + root.allOptions.length
+                    color: root.mutedColor
+                    font.family: root.fontFamily
+                    font.pixelSize: 12
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: promptLabel.right
+                    anchors.leftMargin: 12
+                    visible: searchInput.text === ""
+                    text: root.allOptions.length > 0 ? "type to filter" : ""
+                    color: root.mutedColor
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                }
+
+                TextInput {
+                    id: searchInput
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: promptLabel.right
+                    anchors.leftMargin: 12
+                    anchors.right: counter.visible ? counter.left : parent.right
+                    anchors.rightMargin: 12
+                    color: root.brightColor
+                    font.family: root.fontFamily
+                    font.pixelSize: 14
+                    echoMode: root.passwordMode ? TextInput.Password : TextInput.Normal
+                    passwordCharacter: "•"
+                    clip: true
+
+                    onTextChanged: root.refilter()
+
+                    Keys.onPressed: event => {
+                        switch (event.key) {
+                        case Qt.Key_Escape:
+                            root.finish("");
+                            break;
+                        case Qt.Key_Down:
+                        case Qt.Key_Tab:
+                            root.moveSelection(1);
+                            break;
+                        case Qt.Key_Up:
+                        case Qt.Key_Backtab:
+                            root.moveSelection(-1);
+                            break;
+                        case Qt.Key_Return:
+                        case Qt.Key_Enter:
+                            root.activate();
+                            break;
+                        default:
+                            return;
+                        }
+                        event.accepted = true;
+                    }
+                }
+            }
+
+            Rectangle {
+                id: headerLine
+                anchors.top: header.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: 1
+                anchors.rightMargin: 1
+                height: 1
+                color: root.lineColor
+                visible: root.visibleRows > 0
+            }
+
+            // ---- Option list ----
+            ListView {
+                id: list
+                anchors.top: headerLine.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: 1
+                anchors.rightMargin: 1
+                height: root.visibleRows * root.rowHeight
+                visible: root.visibleRows > 0
+                clip: true
+                model: root.filtered
+
+                delegate: Rectangle {
+                    id: row
+                    required property int index
+                    required property string modelData
+                    readonly property bool selected: index === root.selectedIndex
+                    readonly property bool isDivider: /^-{3,}$/.test(modelData)
+                    width: list.width
+                    height: root.rowHeight
+                    color: selected ? root.selectedBgColor : "transparent"
+
+                    Rectangle { // selection accent bar
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 3
+                        color: root.accentColor
+                        visible: row.selected
+                    }
+
+                    Rectangle { // dividers ("---------") render as a real separator line
+                        anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.right: parent.right
-                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 20
+                        anchors.rightMargin: 20
                         height: 1
-                        color: root.accentColor
+                        color: root.lineColor
+                        visible: row.isDivider
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        visible: searchInput.text === ""
-                        text: root.prompt
-                        color: Qt.rgba(0.97, 0.97, 0.95, 0.5)
-                        font.pixelSize: 15
+                        anchors.leftMargin: 20
+                        anchors.right: parent.right
+                        anchors.rightMargin: 20
+                        visible: !row.isDivider
+                        text: row.modelData
+                        color: row.selected ? root.brightColor : root.textColor
+                        font.family: root.fontFamily
+                        font.pixelSize: 14
+                        font.bold: row.selected
+                        elide: Text.ElideRight
                     }
 
-                    TextInput {
-                        id: searchInput
+                    MouseArea {
                         anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: root.textColor
-                        font.pixelSize: 15
-                        echoMode: root.passwordMode ? TextInput.Password : TextInput.Normal
-                        clip: true
-
-                        onTextChanged: root.refilter()
-
-                        Keys.onPressed: event => {
-                            switch (event.key) {
-                            case Qt.Key_Escape:
-                                root.finish("");
-                                break;
-                            case Qt.Key_Down:
-                            case Qt.Key_Tab:
-                                root.moveSelection(1);
-                                break;
-                            case Qt.Key_Up:
-                            case Qt.Key_Backtab:
-                                root.moveSelection(-1);
-                                break;
-                            case Qt.Key_Return:
-                            case Qt.Key_Enter:
-                                root.activate();
-                                break;
-                            default:
-                                return;
-                            }
-                            event.accepted = true;
+                        onClicked: {
+                            root.selectedIndex = row.index;
+                            root.activate();
                         }
                     }
                 }
+            }
 
-                ListView {
-                    id: list
-                    width: parent.width
-                    height: root.lines * root.rowHeight
-                    visible: root.lines > 0
-                    clip: true
-                    model: root.filtered
+            // ---- Footer: key hints ----
+            Rectangle {
+                anchors.bottom: footer.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.leftMargin: 1
+                anchors.rightMargin: 1
+                height: 1
+                color: root.lineColor
+            }
 
-                    delegate: Rectangle {
-                        id: row
-                        required property int index
-                        required property string modelData
-                        width: list.width
-                        height: root.rowHeight
-                        color: index === root.selectedIndex ? root.fieldColor : "transparent"
+            Item {
+                id: footer
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: 1
+                height: root.footerHeight
 
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 10
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            text: row.modelData
-                            color: root.textColor
-                            font.pixelSize: 15
-                            font.bold: row.index === root.selectedIndex
-                            elide: Text.ElideRight
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                root.selectedIndex = row.index;
-                                root.activate();
-                            }
-                        }
-                    }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.leftMargin: 20
+                    text: root.allOptions.length > 0
+                        ? "↑↓ select  ·  ↵ choose  ·  esc dismiss"
+                        : "↵ confirm  ·  esc dismiss"
+                    color: root.mutedColor
+                    font.family: root.fontFamily
+                    font.pixelSize: 12
                 }
             }
         }
