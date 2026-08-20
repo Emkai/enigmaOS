@@ -8,10 +8,14 @@
 // Drun.qml: application launcher, toggled via:
 //   qs -p <this dir> ipc call drun toggle
 // (bound to super+alt+space through scripts/qs-drun).
+//
+// Bar.qml: top status bar, running alongside waybar for now (see its header
+// comment for why/how it avoids overlapping waybar's strip).
 
 import Quickshell
 
 ShellRoot {
     Menu {}
     Drun {}
+    Bar {}
 }
