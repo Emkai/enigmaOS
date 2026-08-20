@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# Toggle the quickshell application launcher (Drun.qml in configs/quickshell).
+# Quickshell copy of the super+space wofi drun menu; bound to super+alt+space.
+
+QSMENU_CONFIG_DIR="$HOME/.config/quickshell/qsmenu"
+
+if qs -p "$QSMENU_CONFIG_DIR" ipc call drun toggle >/dev/null 2>&1; then
+    exit 0
+fi
+
+# No daemon yet: start it, wait for IPC to come up, then toggle.
+qs -p "$QSMENU_CONFIG_DIR" -d >/dev/null 2>&1
+for _ in $(seq 1 50); do
+    sleep 0.1
+    if qs -p "$QSMENU_CONFIG_DIR" ipc call drun toggle >/dev/null 2>&1; then
+        exit 0
+    fi
+done
+
+notify-send "qs-drun" "quickshell daemon did not come up"
+exit 1
