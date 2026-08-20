@@ -25,8 +25,6 @@ ShellRoot {
     readonly property int rowHeight: 32
     readonly property int headerHeight: 44
     readonly property int footerHeight: 34
-    // The window grows/shrinks with the filtered list; `lines` (wofi's -L) caps it.
-    readonly property int visibleRows: Math.min(filtered.length, lines)
     readonly property string fontFamily: "CaskaydiaMono Nerd Font"
 
     readonly property color bgColor: "#0b0e14"
@@ -136,7 +134,7 @@ ShellRoot {
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
         color: "transparent"
         implicitWidth: 720
-        implicitHeight: root.headerHeight + root.visibleRows * root.rowHeight + root.footerHeight + 2
+        implicitHeight: root.headerHeight + root.lines * root.rowHeight + root.footerHeight + 2
 
         onVisibleChanged: if (visible) searchInput.forceActiveFocus()
 
@@ -240,7 +238,7 @@ ShellRoot {
                 anchors.rightMargin: 1
                 height: 1
                 color: root.lineColor
-                visible: root.visibleRows > 0
+                visible: root.lines > 0
             }
 
             // ---- Option list ----
@@ -251,8 +249,8 @@ ShellRoot {
                 anchors.right: parent.right
                 anchors.leftMargin: 1
                 anchors.rightMargin: 1
-                height: root.visibleRows * root.rowHeight
-                visible: root.visibleRows > 0
+                height: root.lines * root.rowHeight
+                visible: root.lines > 0
                 clip: true
                 model: root.filtered
 
