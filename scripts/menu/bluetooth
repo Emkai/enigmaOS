@@ -194,7 +194,7 @@ bluetooth_device_menu() {
     trusted=$(bluetooth_device_trusted $mac)
     options="$conn_action\n$paired\n$trusted\n$divider\n$goback\n$doexit"
 
-    chosen="$(wofi_menu "$device_name" "$options")"
+    chosen="$(qs_menu "$device_name" "$options")"
 
     # Match chosen option to command
     case $chosen in
@@ -226,7 +226,7 @@ bluetooth_devices_menu() {
         device_names=$(echo "$devices" | cut -d ' ' -f 2-)
         options="$device_names\n$divider\n$goback\n$doexit"
 
-        chosen="$(wofi_menu "Bluetooth devices" "$options")"
+        chosen="$(qs_menu "Bluetooth devices" "$options")"
 
         case $chosen in
             $divider)
@@ -279,7 +279,7 @@ bluetooth_menu() {
             options="$power\n$doexit"
         fi
 
-        chosen="$(wofi_menu "Bluetooth" "$options" )"
+        chosen="$(qs_menu "Bluetooth" "$options" )"
 
         case $chosen in
             $divider)

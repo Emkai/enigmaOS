@@ -1,90 +1,12 @@
 #!/usr/bin/env bash
 
-# Quickshell-rendered copy of the wofi menu system (super+alt+L / wofi-main).
-# All menu logic in scripts/menu/* is shared with the wofi version; this
-# launcher only swaps the picker UI by overriding wofi_menu (and the direct
-# wofi call used for masked password prompts) to render through the
-# quickshell "qsmenu" config in configs/quickshell.
+# Main menu launcher (super+alt+L). The menus live in scripts/menu/* and are
+# rendered by the qsmenu quickshell config (configs/quickshell) via the
+# qs_menu picker in scripts/menu/qsmenu.
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 source "$SCRIPT_DIR/menu/main"
-
-QSMENU_CONFIG_DIR="$HOME/.config/quickshell/qsmenu"
-
-qsmenu_ipc() {
-    qs -p "$QSMENU_CONFIG_DIR" ipc call menu "$@"
-}
-
-qsmenu_ensure_daemon() {
-    qsmenu_ipc echo ok >/dev/null 2>&1 && return 0
-    qs -p "$QSMENU_CONFIG_DIR" -d >/dev/null 2>&1
-    for _ in $(seq 1 50); do
-        sleep 0.1
-        qsmenu_ipc echo ok >/dev/null 2>&1 && return 0
-    done
-    notify-send "qsmenu" "quickshell daemon did not come up"
-    return 1
-}
-
-# Same contract as wofi_menu in scripts/menu/wofi: $1 prompt, $2 options
-# ('\n'-separated, echo -e style escapes), $3 optional line-count override;
-# honors the callers' $max_lines. Prints the selection, the typed text when
-# nothing matched, or nothing when dismissed. Overrides the sourced version.
-wofi_menu() {
-    local prompt=$1
-    local options
-    options=$(printf '%b' "$2")
-
-    local nr_options
-    if [[ -z $3 ]]; then
-        nr_options=$(printf '%s\n' "$options" | wc -l)
-        if [[ -n $max_lines ]] && (( nr_options > max_lines )); then
-            nr_options=$max_lines
-        fi
-    else
-        nr_options=$3
-    fi
-
-    qsmenu_ensure_daemon || return 1
-
-    local fifo
-    fifo=$(mktemp -u "${XDG_RUNTIME_DIR:-/tmp}/qsmenu-XXXXXX")
-    mkfifo -m 600 "$fifo" || return 1
-
-    if ! qsmenu_ipc open "$prompt" "$options" "$fifo" "$nr_options" "${QSMENU_PASSWORD:-false}" >/dev/null 2>&1; then
-        rm -f "$fifo"
-        return 1
-    fi
-
-    # Open read-write so neither side can hang forever on a vanished peer.
-    local chosen="" fd
-    exec {fd}<>"$fifo"
-    IFS= read -r -t 3600 -u "$fd" chosen
-    exec {fd}<&-
-    rm -f "$fifo"
-    printf '%s\n' "$chosen"
-}
-
-# rdp_menu_connect calls the wofi binary directly for its masked password
-# prompt; shadow the binary so that prompt goes through quickshell too.
-wofi() {
-    local -a orig=("$@")
-    local prompt="" password=0
-    while (( $# )); do
-        case $1 in
-            -P) password=1; shift ;;
-            -p) prompt=$2; shift 2 ;;
-            -k | --style | -L) shift 2 ;;
-            *) shift ;;
-        esac
-    done
-    if (( password )); then
-        QSMENU_PASSWORD=true wofi_menu "$prompt" "" 0
-    else
-        command wofi "${orig[@]}"
-    fi
-}
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main_menu "$@"

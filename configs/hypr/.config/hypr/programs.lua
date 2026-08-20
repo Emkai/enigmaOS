@@ -2,7 +2,7 @@
 local M = {
     terminal    = "kitty",
     fileManager = "dolphin",
-    menu        = "wofi -M fuzzy --show drun -i",
+    menu        = "~/src/enigmaOS/scripts/qs-drun",
     browser     = "chromium",
     music       = "spotify",
 }

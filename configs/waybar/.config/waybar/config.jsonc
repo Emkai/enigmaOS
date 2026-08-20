@@ -127,7 +127,7 @@
         "interval": 5,
         "tooltip": true,
         "format": "{}",
-        "on-click": "~/src/enigmaOS/scripts/wofi-bluetooth"
+        "on-click": "~/src/enigmaOS/scripts/qs-bluetooth"
     },
     "custom/network": {
         "exec": "~/src/enigmaOS/scripts/waybar/network-status.sh",
@@ -135,7 +135,7 @@
         "interval": 5,
         "tooltip": true,
         "format": "{}",
-        "on-click": "~/src/enigmaOS/scripts/wofi-wifi"
+        "on-click": "~/src/enigmaOS/scripts/qs-wifi"
     },
     "custom/wireguard": {
         "exec": "~/src/enigmaOS/scripts/waybar/wireguard-status.sh",

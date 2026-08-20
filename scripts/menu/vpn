@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/qsmenu"
 source "$SCRIPT_DIR/../src/vpn.sh"
 
 # Menu labels (status is appended dynamically)
@@ -30,7 +30,7 @@ wireguard_config_submenu() {
             action_option="$connect_label"
         fi
         options="$action_option\n$rename_label\n$divider\n$goback\n$doexit"
-        chosen="$(wofi_menu "WireGuard: $name" "$options")"
+        chosen="$(qs_menu "WireGuard: $name" "$options")"
 
         case $chosen in
             $divider)
@@ -54,9 +54,9 @@ wireguard_config_submenu() {
                 ;;
             $rename_label)
                 # Free-text entry: prefill the current name as the single row;
-                # wofi (dmenu, no require-match) returns whatever is typed on Enter.
+                # qs_menu returns whatever is typed on Enter when nothing matches.
                 local new
-                new=$(printf '%s' "$name" | wofi_menu "New name for $iface" "$name")
+                new=$(printf '%s' "$name" | qs_menu "New name for $iface" "$name")
                 if [[ -n "$new" && "$new" != "$goback" && "$new" != "$doexit" && "$new" != "$divider" ]]; then
                     wireguard_set_name "$iface" "$new"
                 fi
@@ -84,7 +84,7 @@ wireguard_menu() {
 
         [[ -z "$configs_list" ]] && configs_list="(no configs)\n"
         options="${configs_list}$divider\n$goback\n$doexit"
-        chosen="$(max_lines=$max_lines wofi_menu "WireGuard configs" "$options")"
+        chosen="$(max_lines=$max_lines qs_menu "WireGuard configs" "$options")"
 
         case $chosen in
             $divider)
@@ -133,7 +133,7 @@ tailscale_device_submenu() {
             status_text="Connected: no ($status)"
         fi
         options="$status_text\nIP: $ip\n$divider\n$goback\n$doexit"
-        chosen="$(wofi_menu "$hostname" "$options")"
+        chosen="$(qs_menu "$hostname" "$options")"
 
         case $chosen in
             $divider)
@@ -165,7 +165,7 @@ openvpn_config_submenu() {
             action_option="$connect_label"
         fi
         options="$action_option\n$divider\n$goback\n$doexit"
-        chosen="$(wofi_menu "OpenVPN: $config_name" "$options")"
+        chosen="$(qs_menu "OpenVPN: $config_name" "$options")"
 
         case $chosen in
             $divider)
@@ -209,7 +209,7 @@ openvpn_menu() {
 
         [[ -z "$configs_list" ]] && configs_list="(no configs)\n"
         options="${configs_list}$divider\n$goback\n$doexit"
-        chosen="$(max_lines=$max_lines wofi_menu "OpenVPN configs" "$options")"
+        chosen="$(max_lines=$max_lines qs_menu "OpenVPN configs" "$options")"
 
         case $chosen in
             $divider)
@@ -258,7 +258,7 @@ tailscale_devices_menu() {
 
         [[ -z "$devices_list" ]] && devices_list="(no devices)\n"
         options="${devices_list}$divider\n$goback\n$doexit"
-        chosen="$(max_lines=$max_lines wofi_menu "Tailscale devices" "$options")"
+        chosen="$(max_lines=$max_lines qs_menu "Tailscale devices" "$options")"
 
         case $chosen in
             $divider)
@@ -317,7 +317,7 @@ tailscale_menu() {
             options="$tailscale_start_service_label"
         fi
         options="$options\n$sub_options"
-        chosen="$(wofi_menu "Tailscale" "$options")"
+        chosen="$(qs_menu "Tailscale" "$options")"
 
         case $chosen in
             $divider)
@@ -387,7 +387,7 @@ vpn_menu() {
         fi
 
         options="$tailscale_option\n$wireguard_option\n$openvpn_option\n$sub_options"
-        chosen="$(wofi_menu "VPN" "$options")"
+        chosen="$(qs_menu "VPN" "$options")"
 
         case $chosen in
             $divider)

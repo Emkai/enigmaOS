@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/menu/wofi"
-source "$SCRIPT_DIR/menu/wifi"
+source "$SCRIPT_DIR/menu/qsmenu"
+source "$SCRIPT_DIR/menu/time"
 
-wifi_menu "$@"
+time_menu "$@"

@@ -12,11 +12,9 @@ hl.bind(mainMod .. " + E", hl.dsp.exec_cmd(programs.fileManager))
 hl.bind(mainMod .. " + V", hl.dsp.window.float())
 hl.bind(mainMod .. " + S", hl.dsp.layout("togglesplit"))
 hl.bind(mainMod .. " + SPACE", hl.dsp.exec_cmd(programs.menu))
-hl.bind(mainMod .. " + ALT + SPACE", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/qs-drun")) -- quickshell copy of the drun menu
 -- hl.bind(mainMod .. " + K", hl.dsp.exec_cmd("cat ~/.config/hypr/help/tmux $dmenu"))
 -- hl.bind(mainMod .. " + SHIFT + K", hl.dsp.exec_cmd("ls ~/ | $dmenu"))
-hl.bind(mainMod .. " + ALT + L", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/wofi-main"))
-hl.bind(mainMod .. " + ALT + O", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/qs-main")) -- quickshell copy of the wofi menus
+hl.bind(mainMod .. " + ALT + L", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/qs-main"))
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo()) -- dwindle
 hl.bind(mainMod .. " + F", hl.dsp.window.fullscreen())
 -- hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit")) -- dwindle

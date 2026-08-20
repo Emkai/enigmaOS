@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Toggle the quickshell application launcher (Drun.qml in configs/quickshell).
-# Quickshell copy of the super+space wofi drun menu; bound to super+alt+space.
+# Bound to super+space (programs.menu in the hypr config).
 
 QSMENU_CONFIG_DIR="$HOME/.config/quickshell/qsmenu"
 

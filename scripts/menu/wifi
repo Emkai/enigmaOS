@@ -80,7 +80,7 @@ wifi_connect() {
         return $?
     else
         # Need password - prompt user
-        password=$(wofi_menu "Password for $ssid" "" 1 </dev/null)
+        password=$(qs_menu_password "Password for $ssid")
         if [[ -n "$password" ]]; then
             nmcli dev wifi connect "$ssid" password "$password"
             return $?
@@ -125,7 +125,7 @@ wifi_network_menu() {
         options="$conn_action\n$connected\n$saved\n$divider\n$goback\n$doexit"
     fi
 
-    chosen="$(wofi_menu "$ssid" "$options")"
+    chosen="$(qs_menu "$ssid" "$options")"
 
     # Match chosen option to command
     case $chosen in
@@ -177,7 +177,7 @@ wifi_networks_menu() {
         
         options="${networks}$divider\n$goback\n$doexit"
 
-        chosen="$(wofi_menu "WiFi networks" "$options")"
+        chosen="$(qs_menu "WiFi networks" "$options")"
 
         case $chosen in
             $divider)
@@ -237,7 +237,7 @@ wifi_menu() {
             options="$power\n$sub_options"
         fi
 
-        chosen="$(wofi_menu "WiFi" "$options" )"
+        chosen="$(qs_menu "WiFi" "$options" )"
 
         case $chosen in
             $divider)

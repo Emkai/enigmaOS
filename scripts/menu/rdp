@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/qsmenu"
 source "$SCRIPT_DIR/../src/rdp.sh"
 
 # Launcher used to start a connection in its own (detached) session.
 RDP_BIN="$SCRIPT_DIR/../rdp"
 
-# Acquire the password (decrypt the stored one, or prompt with a masked wofi
+# Acquire the password (decrypt the stored one, or prompt with a masked
 # field) and launch xfreerdp3 detached so the menu can close. The password is
 # handed to the launcher via the environment (owner-only /proc/<pid>/environ),
 # never on the command line. Returns non-zero if the user cancels the prompt.
@@ -17,7 +17,7 @@ rdp_menu_connect() {
     if [[ -n "$enc" ]]; then
         pw="$(printf '%s' "$enc" | rdp_decrypt)"
     else
-        pw="$(wofi -d -P -k /dev/null --style "$STYLES_FILE" -p "Password for $name" -L 0 < /dev/null)"
+        pw="$(qs_menu_password "Password for $name")"
         [[ -z "$pw" ]] && return 1
     fi
     setsid -f env RDP_PASSWORD="$pw" "$RDP_BIN" -e "$name" >/dev/null 2>&1
@@ -39,7 +39,7 @@ rdp_connection_submenu() {
 
     while true; do
         options="$connect_label\n$remove_label\n$divider\n$info\n$divider\n$goback\n$doexit"
-        chosen="$(wofi_menu "$name" "$options")"
+        chosen="$(qs_menu "$name" "$options")"
 
         case $chosen in
             $connect_label)
@@ -49,7 +49,7 @@ rdp_connection_submenu() {
                 fi
                 ;;
             $remove_label)
-                confirm="$(wofi_menu "Remove '$name'?" "No\nYes" 2)"
+                confirm="$(qs_menu "Remove '$name'?" "No\nYes" 2)"
                 if [[ "$confirm" == "Yes" ]]; then
                     RDP_YES=1 rdp_remove "$name" >/dev/null 2>&1
                     echo "$goback"
@@ -97,7 +97,7 @@ rdp_menu() {
 
         [[ -z "$conn_list" ]] && conn_list="(no connections)\n"
         options="${conn_list}$sub_options"
-        chosen="$(max_lines=$max_lines wofi_menu "RDP" "$options")"
+        chosen="$(max_lines=$max_lines qs_menu "RDP" "$options")"
 
         case $chosen in
             $divider)

@@ -268,7 +268,7 @@ rdp_connect() {
     extra="$(rdp_get "$name" extra)"
     proxy="$(rdp_get "$name" proxy)"
 
-    # RDP_PASSWORD lets a front-end (e.g. the wofi menu) supply an
+    # RDP_PASSWORD lets a front-end (e.g. the qs-rdp menu) supply an
     # already-decrypted password to a detached, TTY-less launch.
     if [[ -n "${RDP_PASSWORD:-}" ]]; then
         password="$RDP_PASSWORD"
@@ -393,7 +393,7 @@ Connections may be referenced by name or by the 1-based index shown in 'rdp -l'.
 Passwords are encrypted at rest and passed to xfreerdp3 via /from-stdin
 (so they never appear in the process list). Config file is kept at mode 600.
 SSH-tunnel proxies need non-interactive auth (key/agent) when launched from
-the wofi menu, since that runs detached from any terminal.
+the qs-rdp menu, since that runs detached from any terminal.
 
 Config: $RDP_CONFIG_FILE
 EOF

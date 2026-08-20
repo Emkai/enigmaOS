@@ -26,7 +26,7 @@ time_add_menu() {
         task_options="$task_options\n$divider\n$goback\n$doexit"
 
         local chosen
-        chosen="$(wofi_menu "Select task" "$task_options")"
+        chosen="$(qs_menu "Select task" "$task_options")"
 
         case $chosen in
             $divider)
@@ -50,7 +50,7 @@ time_add_menu() {
 
                 # Prompt for hours
                 local hours
-                hours=$(wofi_menu "Hours" "" 1 </dev/null)
+                hours=$(qs_menu "Hours" "" 1 </dev/null)
 
                 if [[ -z "$hours" ]]; then
                     continue
@@ -66,7 +66,7 @@ time_add_menu() {
                 local today
                 today=$(date +%Y-%m-%d)
                 local date
-                date=$(wofi_menu "Date (default: $today)" "" 1 </dev/null)
+                date=$(qs_menu "Date (default: $today)" "" 1 </dev/null)
 
                 if [[ -z "$date" ]]; then
                     date="$today"
@@ -95,7 +95,7 @@ time_recent_menu() {
 
     local options="$entries\n$divider\n$goback\n$doexit"
     local chosen
-    chosen="$(wofi_menu "Recent time entries" "$options")"
+    chosen="$(qs_menu "Recent time entries" "$options")"
 
     case $chosen in
         $goback)
@@ -114,7 +114,7 @@ time_report_menu() {
     current_month=$(date +%Y-%m)
 
     local month
-    month=$(wofi_menu "Month (default: $current_month)" "" 1 </dev/null)
+    month=$(qs_menu "Month (default: $current_month)" "" 1 </dev/null)
 
     if [[ -z "$month" ]]; then
         month="$current_month"
@@ -135,7 +135,7 @@ time_invoice_menu() {
     current_month=$(date +%Y-%m)
 
     local month
-    month=$(wofi_menu "Month (default: $current_month)" "" 1 </dev/null)
+    month=$(qs_menu "Month (default: $current_month)" "" 1 </dev/null)
 
     if [[ -z "$month" ]]; then
         month="$current_month"
@@ -160,7 +160,7 @@ time_invoice_menu() {
     client_options="$client_options\n$divider\n$goback\n$doexit"
 
     local chosen
-    chosen="$(wofi_menu "Select client" "$client_options")"
+    chosen="$(qs_menu "Select client" "$client_options")"
 
     case $chosen in
         $divider | $goback | "" | $doexit)
@@ -202,7 +202,7 @@ time_menu() {
         local ret=""
 
         options="$add_time_label\n$today_label\n$month_label\n$recent_entries_label\n$generate_report_label\n$generate_invoice_label\n$sub_options"
-        chosen="$(wofi_menu "Time" "$options")"
+        chosen="$(qs_menu "Time" "$options")"
 
         case $chosen in
             $add_time_label)

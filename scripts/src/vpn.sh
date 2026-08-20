@@ -6,6 +6,7 @@ VPN_ICON="󰒋"
 # User-owned display-name mapping for the WireGuard menu (configs in
 # /etc/wireguard are root:root 0600, so we can't read names from them as the
 # user). Follows the repo convention used by src/rdp.sh and src/ask.sh.
+# Legacy path (named for the old wofi menu) kept so stored names survive.
 WIREGUARD_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/wofi-vpn"
 WIREGUARD_NAMES_FILE="${WIREGUARD_NAMES_FILE:-$WIREGUARD_CONFIG_DIR/names.conf}"
 
@@ -441,7 +442,7 @@ Usage: vpn -l              List VPNs and their connection status
   WireGuard display name   as set with -R/-N
   openvpn3 config name     as shown by 'openvpn3 configs-list'
 
-The wofi menu (wofi-vpn) drives the same backends and display names, so the
+The menu (qs-vpn) drives the same backends and display names, so the
 two stay in sync. Display names file: $WIREGUARD_NAMES_FILE
 EOF
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-source "$SCRIPT_DIR/wofi"
+source "$SCRIPT_DIR/qsmenu"
 source "$SCRIPT_DIR/bluetooth"
 source "$SCRIPT_DIR/wifi"
 source "$SCRIPT_DIR/power"
@@ -30,7 +30,7 @@ main_menu() {
 
     while true; do
         options="$power_menu\n$bluetooth_menu\n$wifi_menu\n$vpn_menu_label\n$rdp_menu_label\n$time_menu_label\n$sub_options"
-        chosen="$(wofi_menu "menu" "$options")"
+        chosen="$(qs_menu "menu" "$options")"
 
         case $chosen in
             $power_menu)

@@ -16,8 +16,7 @@ hyprlock
 hyprshot
 uwsm
 waybar
-wofi
-quickshell     # QML shell toolkit — renders the qsmenu menus (scripts/qs-main)
+quickshell     # QML shell toolkit — renders the menus and drun launcher (scripts/qs-*)
 dunst
 sddm
 grim
