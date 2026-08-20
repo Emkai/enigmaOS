@@ -28,12 +28,12 @@ Scope {
     readonly property int dropdownTopMargin: barTopMargin + barHeight
 
     readonly property color bg: "#000000"
-    readonly property color textBright: "#e8ecf1"
-    readonly property color textDefault: "#b6bdc6"
-    readonly property color textDim: "#6e7782"
-    readonly property color textDimmer: "#4a5058"
-    readonly property color textFaint: "#3d434a"
-    readonly property color hairline: "#141d28"
+    readonly property color textBright: "#f2f5f8"
+    readonly property color textDefault: "#c7cdd6"
+    readonly property color textDim: "#98a1ac"
+    readonly property color textDimmer: "#6b7480"
+    readonly property color textFaint: "#545c68"
+    readonly property color hairline: "#232b36"
     readonly property color accent: Theme.accentColor
     readonly property color hoverBg: Qt.rgba(accent.r, accent.g, accent.b, 0.10)
 
