@@ -23,7 +23,7 @@ import Quickshell.Networking
 Scope {
     id: root
 
-    readonly property int barHeight: 30
+    readonly property int barHeight: 34
     readonly property int barTopMargin: 0 // waybar is parked; bump to 18 if it's re-enabled alongside this bar
     readonly property int dropdownTopMargin: barTopMargin + barHeight
 
@@ -307,7 +307,7 @@ Scope {
         anchors {
             top: true
             left: align !== "right"
-            right: align !== "left"
+            right: align === "right"
         }
         margins.top: root.dropdownTopMargin
         margins.left: align === "center" ? Math.round((barScreen.width - popupWidth) / 2) : 12
@@ -339,7 +339,7 @@ Scope {
     component SectionLabel: Text {
         color: root.textDimmer
         font.family: Theme.fontFamily
-        font.pixelSize: 11
+        font.pixelSize: 12
         font.letterSpacing: 1
     }
 
@@ -402,7 +402,7 @@ Scope {
                         text: root.isoWeek(root.now)
                         color: root.textDim
                         font.family: Theme.fontFamily
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                         leftPadding: 10
                         rightPadding: 8
                         verticalAlignment: Text.AlignVCenter
@@ -420,7 +420,7 @@ Scope {
                             text: root.pad2(root.now.getHours()) + ":" + root.pad2(root.now.getMinutes())
                             color: root.textBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
 
                         MouseArea {
@@ -444,14 +444,14 @@ Scope {
                             text: root.monthNames[root.now.getMonth()] + " " + root.now.getFullYear()
                             color: root.textBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         Item { width: parent.width - 140; height: 1 }
                         Text {
                             text: "w" + root.isoWeek(root.now)
                             color: root.textDimmer
                             font.family: Theme.fontFamily
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                         }
                     }
 
@@ -466,12 +466,12 @@ Scope {
                                 required property string modelData
                                 text: modelData
                                 width: (parent.width - 12) / 7
-                                height: 22
+                                height: 24
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                                 color: root.textFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                             }
                         }
 
@@ -480,14 +480,14 @@ Scope {
                             delegate: Rectangle {
                                 required property var modelData
                                 width: (parent.width - 12) / 7
-                                height: 22
+                                height: 24
                                 color: modelData.today ? root.accent : "transparent"
                                 Text {
                                     anchors.centerIn: parent
                                     text: modelData.t
                                     color: modelData.today ? "#ffffff" : root.textDim
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 11
+                                    font.pixelSize: 12
                                 }
                             }
                         }
@@ -510,7 +510,7 @@ Scope {
                             text: Math.round(root.cpuPct) + "%"
                             color: root.textBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -530,15 +530,15 @@ Scope {
                             model: barWin.wsList
                             delegate: Rectangle {
                                 required property var modelData
-                                width: 20
-                                height: 18
+                                width: 22
+                                height: 20
                                 color: modelData.active ? root.accent : "transparent"
                                 Text {
                                     anchors.centerIn: parent
                                     text: modelData.id
-                                    color: modelData.active ? "#ffffff" : root.textDimmer
+                                    color: "#ffffff"
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 12
+                                    font.pixelSize: 13
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -558,7 +558,7 @@ Scope {
                             text: root.ramGiB.toFixed(1) + " GiB"
                             color: root.textBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -581,8 +581,8 @@ Scope {
                         delegate: Row {
                             required property var modelData
                             width: parent.width
-                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 50 }
-                            Text { text: modelData.pct; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12; width: 50; horizontalAlignment: Text.AlignRight }
+                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 50 }
+                            Text { text: modelData.pct; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 50; horizontalAlignment: Text.AlignRight }
                         }
                     }
                 }
@@ -599,8 +599,8 @@ Scope {
                         delegate: Row {
                             required property var modelData
                             width: parent.width
-                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12; elide: Text.ElideRight; width: parent.width - 60 }
-                            Text { text: modelData.v; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12; width: 60; horizontalAlignment: Text.AlignRight }
+                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 60 }
+                            Text { text: modelData.v; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 60; horizontalAlignment: Text.AlignRight }
                         }
                     }
                 }
@@ -610,7 +610,7 @@ Scope {
                     id: rightRow
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 0
+                    spacing: 8
 
                     // VPN
                     Rectangle {
@@ -621,7 +621,7 @@ Scope {
                             id: vpnRow
                             anchors.centerIn: parent
                             spacing: 5
-                            Text { text: ""; color: root.accent; font.family: Theme.fontFamily; font.pixelSize: 12; visible: root.vpnEntries.length > 0 }
+                            Text { text: ""; color: root.accent; font.family: Theme.fontFamily; font.pixelSize: 13; visible: root.vpnEntries.length > 0 }
                             Repeater {
                                 model: root.vpnEntries
                                 delegate: Text {
@@ -629,7 +629,7 @@ Scope {
                                     text: modelData.kind === "WG" ? "W" : modelData.kind === "TS" ? "T" : "O"
                                     color: root.accent
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 11
+                                    font.pixelSize: 12
                                 }
                             }
                         }
@@ -653,7 +653,7 @@ Scope {
                             text: root.kbLayout
                             color: root.textBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            font.pixelSize: 13
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -678,9 +678,9 @@ Scope {
                                 text: Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted ? "" : ""
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                             }
-                            Text { text: root.volumePct() + "%"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                            Text { text: root.volumePct() + "%"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13 }
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -700,7 +700,7 @@ Scope {
 
                     // Bluetooth
                     Rectangle {
-                        width: 30
+                        width: 34
                         height: root.barHeight
                         color: hsBt.open ? root.hoverBg : "transparent"
                         Text {
@@ -708,7 +708,7 @@ Scope {
                             text: ""
                             color: Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.enabled ? root.accent : root.textDimmer
                             font.family: Theme.fontFamily
-                            font.pixelSize: 13
+                            font.pixelSize: 15
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -720,7 +720,7 @@ Scope {
 
                     // Network
                     Rectangle {
-                        width: 30
+                        width: 34
                         height: root.barHeight
                         color: hsNet.open ? root.hoverBg : "transparent"
                         Text {
@@ -728,7 +728,7 @@ Scope {
                             text: root.netKind === "wired" ? "" : ""
                             color: root.textDefault
                             font.family: Theme.fontFamily
-                            font.pixelSize: 13
+                            font.pixelSize: 15
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -751,13 +751,13 @@ Scope {
                                 text: UPower.displayDevice && UPower.displayDevice.state === UPowerDeviceState.Charging ? "󰂄" : "󰁹"
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                             }
                             Text {
                                 text: UPower.displayDevice ? Math.round(UPower.displayDevice.percentage * 100) + "%" : "?"
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                             }
                         }
                         MouseArea {
@@ -781,8 +781,8 @@ Scope {
                         delegate: Row {
                             required property var modelData
                             width: parent.width
-                            Text { text: modelData.iface; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width * 0.4 }
-                            Text { text: modelData.detail; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width * 0.6; horizontalAlignment: Text.AlignRight }
+                            Text { text: modelData.iface; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width * 0.4 }
+                            Text { text: modelData.detail; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width * 0.6; horizontalAlignment: Text.AlignRight }
                         }
                     }
                     Text {
@@ -790,7 +790,7 @@ Scope {
                         text: "no active VPN connections"
                         color: root.textFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                 }
 
@@ -802,13 +802,13 @@ Scope {
 
                     Row {
                         width: parent.width
-                        Text { text: "OUTPUT"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 11; font.letterSpacing: 1 }
+                        Text { text: "OUTPUT"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12; font.letterSpacing: 1 }
                         Item { width: parent.width - 100; height: 1 }
                         Text {
                             text: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? "MUTED" : "MUTE"
                             color: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? root.accent : root.textDimmer
                             font.family: Theme.fontFamily
-                            font.pixelSize: 11
+                            font.pixelSize: 12
                             MouseArea {
                                 anchors.fill: parent
                                 onClicked: if (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio)
@@ -825,7 +825,7 @@ Scope {
                             delegate: Rectangle {
                                 required property int index
                                 width: (parent.width - 19 * 3) / 20
-                                height: 16
+                                height: 18
                                 color: (index + 1) * 5 <= root.volumePct() ? root.accent : "#161a1f"
                                 MouseArea {
                                     anchors.fill: parent
@@ -844,7 +844,7 @@ Scope {
                         delegate: Item {
                             required property var modelData
                             width: parent.width
-                            height: 18
+                            height: 20
                             Text {
                                 anchors.left: parent.left
                                 anchors.right: activeLabel.left
@@ -852,7 +852,7 @@ Scope {
                                 text: modelData.description || modelData.name
                                 color: modelData === Pipewire.defaultAudioSink ? root.textBright : root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 elide: Text.ElideRight
                             }
                             Text {
@@ -862,7 +862,7 @@ Scope {
                                 text: modelData === Pipewire.defaultAudioSink ? "ACTIVE" : ""
                                 color: root.accent
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 10
+                                font.pixelSize: 11
                                 width: 60
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -881,7 +881,7 @@ Scope {
                                 text: modelData.properties && modelData.properties["application.name"] ? modelData.properties["application.name"] : modelData.name
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 width: 84
                                 elide: Text.ElideRight
                             }
@@ -896,7 +896,7 @@ Scope {
                                 text: Math.round(modelData.audio.volume * 100) + "%"
                                 color: root.textDim
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 width: 34
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -907,7 +907,7 @@ Scope {
                         text: "pavucontrol · wpctl"
                         color: root.textDimmer
                         font.family: Theme.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         topPadding: 8
                         MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(["pavucontrol"]) }
                     }
@@ -923,7 +923,7 @@ Scope {
                         text: "BLUETOOTH · " + (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.enabled ? "ON" : "OFF")
                         color: root.textDimmer
                         font.family: Theme.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         font.letterSpacing: 1
                         MouseArea {
                             anchors.fill: parent
@@ -936,7 +936,7 @@ Scope {
                         delegate: Item {
                             required property var modelData
                             width: parent.width
-                            height: 18
+                            height: 20
                             Text {
                                 anchors.left: parent.left
                                 anchors.right: statusLabel.left
@@ -944,7 +944,7 @@ Scope {
                                 text: modelData.name || modelData.deviceName
                                 color: modelData.connected ? root.textBright : root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 elide: Text.ElideRight
                             }
                             Text {
@@ -954,7 +954,7 @@ Scope {
                                 text: modelData.connected ? "CONNECTED" : "PAIRED"
                                 color: modelData.connected ? root.accent : root.textDimmer
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 10
+                                font.pixelSize: 11
                                 width: 90
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -968,7 +968,7 @@ Scope {
                         text: "bluetoothctl · scan on"
                         color: root.textDimmer
                         font.family: Theme.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         topPadding: 8
                         MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-bluetooth"]) }
                     }
@@ -987,13 +987,13 @@ Scope {
                         SectionLabel { text: "WIRED · " + (root.netWired ? root.netWired.dev : "") }
                         Row {
                             width: parent.width
-                            Text { text: "ipv4"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width - 120 }
-                            Text { text: root.netWired ? root.netWired.ip4 : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12; width: 120; horizontalAlignment: Text.AlignRight }
+                            Text { text: "ipv4"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
+                            Text { text: root.netWired ? root.netWired.ip4 : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
                         }
                         Row {
                             width: parent.width
-                            Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12; width: parent.width - 120 }
-                            Text { text: root.netWired ? root.netWired.gw : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12; width: 120; horizontalAlignment: Text.AlignRight }
+                            Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
+                            Text { text: root.netWired ? root.netWired.gw : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
                         }
                     }
 
@@ -1008,7 +1008,7 @@ Scope {
                                 text: modelData.ssid
                                 color: modelData.active ? root.textBright : root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 elide: Text.ElideRight
                                 width: parent.width - 90
                             }
@@ -1016,14 +1016,14 @@ Scope {
                                 text: modelData.security
                                 color: root.textDimmer
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 10
+                                font.pixelSize: 11
                                 width: 50
                             }
                             Text {
                                 text: modelData.signal + "%"
                                 color: root.textFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 11
+                                font.pixelSize: 12
                                 width: 40
                                 horizontalAlignment: Text.AlignRight
                             }
@@ -1033,7 +1033,7 @@ Scope {
                         text: "nmtui / qs-wifi"
                         color: root.textDimmer
                         font.family: Theme.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: 12
                         topPadding: 8
                         MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"]) }
                     }
@@ -1051,7 +1051,7 @@ Scope {
                             : ""
                         color: root.textDefault
                         font.family: Theme.fontFamily
-                        font.pixelSize: 12
+                        font.pixelSize: 13
                     }
                     SectionLabel { text: "POWER"; topPadding: 8 }
 
@@ -1066,16 +1066,16 @@ Scope {
                         delegate: Item {
                             required property var modelData
                             width: parent.width
-                            height: 18
+                            height: 20
                             Text {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12
+                                text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13
                             }
                             Text {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.key; color: root.textFaint; font.family: Theme.fontFamily; font.pixelSize: 10
+                                text: modelData.key; color: root.textFaint; font.family: Theme.fontFamily; font.pixelSize: 11
                             }
                             MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(modelData.cmd) }
                         }
