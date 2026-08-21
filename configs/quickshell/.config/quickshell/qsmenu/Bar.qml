@@ -440,7 +440,7 @@ Scope {
 
             Rectangle {
                 anchors.fill: parent
-                color: root.bg
+                color: "transparent"
 
                 // ---------------- LEFT ----------------
                 Row {
