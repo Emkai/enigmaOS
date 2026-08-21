@@ -26,6 +26,16 @@ hl.window_rule({
     size = "700 400",
 })
 
+-- nmtui popup (launched from the quickshell wifi dropdown): small floating
+-- terminal, centered on screen
+hl.window_rule({
+    name = "nmtui-popup-float-center",
+    match = { class = "^(nmtui-popup)$" },
+    float = true,
+    center = true,
+    size = "700 500",
+})
+
 -- Fix some dragging issues with XWayland
 hl.window_rule({
     name = "windowrule-2",

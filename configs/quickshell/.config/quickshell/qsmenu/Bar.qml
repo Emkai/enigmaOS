@@ -1003,7 +1003,7 @@ Scope {
                         Text {
                             id: pavuText
                             anchors.centerIn: parent
-                            text: "pavucontrol · wpctl"
+                            text: "pavucontrol"
                             color: root.textDimmer
                             font.family: Theme.fontFamily
                             font.pixelSize: 12
@@ -1070,7 +1070,7 @@ Scope {
                             Text {
                                 id: btctlText
                                 anchors.centerIn: parent
-                                text: "bluetoothctl"
+                                text: "qs-bluetooth"
                                 color: root.textDimmer
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 12
@@ -1116,21 +1116,31 @@ Scope {
                     }
 
                     SectionLabel { text: "WI-FI"; topPadding: 6 }
+                    Timer { id: wifiRefreshTimer; interval: 2500; onTriggered: netProc.running = true }
                     Repeater {
                         model: root.netWifiList
-                        delegate: Row {
+                        delegate: MenuButton {
                             required property var modelData
                             width: parent.width
-                            spacing: 8
+                            discrete: true
+                            onClicked: {
+                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--connect", modelData.ssid]);
+                                wifiRefreshTimer.restart();
+                            }
                             Text {
+                                anchors.left: parent.left
+                                anchors.right: securityLabel.left
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.ssid
                                 color: modelData.active ? root.textBright : root.textDefault
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
-                                width: parent.width - 106
                             }
                             Text {
+                                id: securityLabel
+                                anchors.right: signalLabel.left
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.security
                                 color: root.textDimmer
                                 font.family: Theme.fontFamily
@@ -1138,6 +1148,9 @@ Scope {
                                 width: 50
                             }
                             Text {
+                                id: signalLabel
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.signal + "%"
                                 color: root.textFaint
                                 font.family: Theme.fontFamily
@@ -1148,16 +1161,31 @@ Scope {
                         }
                     }
                     Item { width: 1; height: 4 }
-                    MenuButton {
-                        width: wifiLinkText.implicitWidth + 16
-                        onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"])
-                        Text {
-                            id: wifiLinkText
-                            anchors.centerIn: parent
-                            text: "nmtui / qs-wifi"
-                            color: root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                    Row {
+                        spacing: 8
+                        MenuButton {
+                            width: nmtuiText.implicitWidth + 16
+                            onClicked: Quickshell.execDetached(["kitty", "--class", "nmtui-popup", "-e", "nmtui"])
+                            Text {
+                                id: nmtuiText
+                                anchors.centerIn: parent
+                                text: "nmtui"
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+                        }
+                        MenuButton {
+                            width: qsWifiText.implicitWidth + 16
+                            onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"])
+                            Text {
+                                id: qsWifiText
+                                anchors.centerIn: parent
+                                text: "qs-wifi"
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
                         }
                     }
                 }
@@ -1168,15 +1196,7 @@ Scope {
                     align: "right"
                     popupWidth: 216
 
-                    Text {
-                        text: UPower.displayDevice
-                            ? (UPower.displayDevice.state === UPowerDeviceState.Charging ? "charging" : "discharging")
-                            : ""
-                        color: root.textDefault
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 13
-                    }
-                    SectionLabel { text: "POWER"; topPadding: 8 }
+                    SectionLabel { text: "POWER" }
 
                     Repeater {
                         model: [

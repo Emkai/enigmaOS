@@ -90,6 +90,20 @@ wifi_connect() {
     fi
 }
 
+# Connect to (or disconnect from) an SSID directly, without the submenu —
+# used by the quickshell bar's wifi dropdown, where clicking a network row
+# is the whole interaction. Password prompt (if needed) reuses the same
+# quickshell menu popup as the rest of this script via qs_menu_password.
+wifi_connect_or_disconnect() {
+    ssid="$1"
+    current=$(wifi_get_current)
+    if [[ "$ssid" == "$current" ]]; then
+        wifi_disconnect
+    else
+        wifi_connect "$ssid"
+    fi
+}
+
 # Rescan for networks
 wifi_rescan() {
     nmcli dev wifi rescan 2>/dev/null

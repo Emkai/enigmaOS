@@ -4,4 +4,8 @@ SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 source "$SCRIPT_DIR/menu/qsmenu"
 source "$SCRIPT_DIR/menu/wifi"
 
-wifi_menu "$@"
+if [[ "$1" == "--connect" ]]; then
+    wifi_connect_or_disconnect "$2"
+else
+    wifi_menu "$@"
+fi
