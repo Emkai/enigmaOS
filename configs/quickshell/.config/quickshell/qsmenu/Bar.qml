@@ -202,6 +202,9 @@ Scope {
     property string netKind: "none" // "wired" | "wifi" | "none"
     property var netWired: null
     property var netWifiList: []
+    property string wifiExpandedSsid: ""
+    property bool wifiExpandedNeedsPassword: false
+    property bool wifiShowPassword: false
 
     Process {
         id: netProc
@@ -218,17 +221,23 @@ Scope {
                 [[ -z "$ssid" ]] && continue
                 printf 'WIFI\\t%s\\t%s\\t%s\\t%s\\n' "$active" "$ssid" "$signal" "\${sec:-open}"
             done
+            nmcli -t -f name,type connection show 2>/dev/null | awk -F: '$2=="802-11-wireless"{print "SAVED\\t"$1}'
         `]
         stdout: StdioCollector {
             id: netCollector
             onStreamFinished: {
                 let kind = "none", wired = null;
                 const wifi = [];
+                const saved = new Set();
+                for (const line of netCollector.text.split("\n")) {
+                    const p = line.split("\t");
+                    if (p[0] === "SAVED") saved.add(p[1]);
+                }
                 for (const line of netCollector.text.split("\n")) {
                     const p = line.split("\t");
                     if (p[0] === "TYPE") kind = p[1];
                     else if (p[0] === "ETH") wired = { dev: p[1], ip4: p[2], gw: p[3] };
-                    else if (p[0] === "WIFI") wifi.push({ active: p[1] === "yes", ssid: p[2], signal: p[3], security: p[4] });
+                    else if (p[0] === "WIFI") wifi.push({ active: p[1] === "yes", ssid: p[2], signal: p[3], security: p[4], saved: saved.has(p[2]) });
                 }
                 root.netKind = kind;
                 root.netWired = wired;
@@ -296,6 +305,11 @@ Scope {
         required property var hover // HoverState driving this dropdown's open/close
         property int popupWidth: 260
         property string align: "right" // "left" | "right" | "center"
+        // Dropdowns open on hover, so they don't grab keyboard focus by default
+        // (that would steal it from whatever app the user is typing in just from
+        // glancing at the bar). Set true only while a dropdown has an actual text
+        // input the user asked to type into (e.g. the wifi password field).
+        property bool wantsKeyboard: false
         default property alias content: col.data
 
         screen: barScreen
@@ -304,6 +318,7 @@ Scope {
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "qsbar-dropdown"
+        WlrLayershell.keyboardFocus: wantsKeyboard ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
         anchors {
             top: true
             left: align !== "right"
@@ -1096,7 +1111,8 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsNet
                     align: "right"
-                    popupWidth: 300
+                    popupWidth: 380
+                    wantsKeyboard: root.wifiExpandedSsid !== "" && root.wifiExpandedNeedsPassword
 
                     Column {
                         width: parent.width
@@ -1119,44 +1135,153 @@ Scope {
                     Timer { id: wifiRefreshTimer; interval: 2500; onTriggered: netProc.running = true }
                     Repeater {
                         model: root.netWifiList
-                        delegate: MenuButton {
+                        delegate: Column {
+                            id: wifiRow
                             required property var modelData
+                            readonly property bool expanded: root.wifiExpandedSsid === modelData.ssid
                             width: parent.width
-                            discrete: true
-                            onClicked: {
-                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--connect", modelData.ssid]);
-                                wifiRefreshTimer.restart();
+                            spacing: 0
+
+                            MenuButton {
+                                width: parent.width
+                                discrete: true
+                                onClicked: {
+                                    root.wifiExpandedSsid = wifiRow.expanded ? "" : modelData.ssid;
+                                    root.wifiExpandedNeedsPassword = !modelData.saved;
+                                    root.wifiShowPassword = false;
+                                }
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: securityLabel.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: (modelData.active ? "● " : "") + modelData.ssid
+                                    color: modelData.active ? root.accent : root.textDefault
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    id: securityLabel
+                                    anchors.right: signalLabel.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.active ? "connected" : modelData.security
+                                    color: modelData.active ? root.accent : root.textDimmer
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 11
+                                    width: 62
+                                    horizontalAlignment: Text.AlignRight
+                                }
+                                Text {
+                                    id: signalLabel
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.signal + "%"
+                                    color: root.textFaint
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 12
+                                    width: 40
+                                    horizontalAlignment: Text.AlignRight
+                                }
                             }
-                            Text {
-                                anchors.left: parent.left
-                                anchors.right: securityLabel.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.ssid
-                                color: modelData.active ? root.textBright : root.textDefault
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 13
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                id: securityLabel
-                                anchors.right: signalLabel.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.security
-                                color: root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                                width: 50
-                            }
-                            Text {
-                                id: signalLabel
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.signal + "%"
-                                color: root.textFaint
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                                width: 40
-                                horizontalAlignment: Text.AlignRight
+
+                            Column {
+                                width: parent.width
+                                visible: wifiRow.expanded
+                                topPadding: 4
+                                bottomPadding: 6
+                                spacing: 6
+                                onVisibleChanged: if (visible && !modelData.saved) pwInput.forceActiveFocus()
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 24
+                                    radius: 3
+                                    visible: !modelData.saved
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: pwInput.activeFocus ? root.accent : root.hairline
+
+                                    TextInput {
+                                        id: pwInput
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        color: root.textDefault
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 13
+                                        clip: true
+                                        echoMode: root.wifiShowPassword ? TextInput.Normal : TextInput.Password
+                                        passwordCharacter: "•"
+                                        Keys.onReturnPressed: connectBtn.clicked()
+                                        Keys.onEscapePressed: root.wifiExpandedSsid = ""
+                                    }
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "password"
+                                        color: root.textFaint
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 13
+                                        visible: pwInput.text === "" && !pwInput.activeFocus
+                                    }
+                                }
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 6
+
+                                    MenuButton {
+                                        width: 44
+                                        discrete: true
+                                        visible: !modelData.saved
+                                        onClicked: root.wifiShowPassword = !root.wifiShowPassword
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: root.wifiShowPassword ? "hide" : "show"
+                                            color: root.textDimmer
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    MenuButton {
+                                        id: connectBtn
+                                        width: 72
+                                        onClicked: {
+                                            if (modelData.active) {
+                                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--disconnect"]);
+                                            } else {
+                                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--connect", modelData.ssid, pwInput.text]);
+                                            }
+                                            root.wifiExpandedSsid = "";
+                                            wifiRefreshTimer.restart();
+                                        }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.active ? "disconnect" : "connect"
+                                            color: root.textDefault
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    MenuButton {
+                                        width: 56
+                                        visible: modelData.saved
+                                        onClicked: {
+                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", modelData.ssid]);
+                                            root.wifiExpandedSsid = "";
+                                            wifiRefreshTimer.restart();
+                                        }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "forget"
+                                            color: root.textDefault
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

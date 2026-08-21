@@ -5,7 +5,11 @@ source "$SCRIPT_DIR/menu/qsmenu"
 source "$SCRIPT_DIR/menu/wifi"
 
 if [[ "$1" == "--connect" ]]; then
-    wifi_connect_or_disconnect "$2"
+    wifi_connect_or_disconnect "$2" "$3"
+elif [[ "$1" == "--disconnect" ]]; then
+    wifi_disconnect
+elif [[ "$1" == "--forget" ]]; then
+    wifi_forget "$2"
 else
     wifi_menu "$@"
 fi

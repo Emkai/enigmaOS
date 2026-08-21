@@ -61,19 +61,27 @@ wifi_signal_icon() {
     fi
 }
 
-# Connect to a network
+# Connect to a network. An explicit password (2nd arg) always wins and is
+# used as-is, whether or not the network already has a saved profile — this
+# is how the quickshell bar's inline password field forces a (re)connect.
 wifi_connect() {
     ssid="$1"
-    
+    password="$2"
+
+    if [[ -n "$password" ]]; then
+        nmcli dev wifi connect "$ssid" password "$password"
+        return $?
+    fi
+
     # Check if we have a saved connection for this network
     if nmcli -t -f name connection show | grep -qx "$ssid"; then
         nmcli connection up "$ssid"
         return $?
     fi
-    
+
     # Check if network requires password
     security=$(nmcli -t -f ssid,security dev wifi list | grep "^${ssid}:" | cut -d':' -f2)
-    
+
     if [[ -z "$security" || "$security" == "--" ]]; then
         # Open network
         nmcli dev wifi connect "$ssid"
@@ -93,15 +101,24 @@ wifi_connect() {
 # Connect to (or disconnect from) an SSID directly, without the submenu —
 # used by the quickshell bar's wifi dropdown, where clicking a network row
 # is the whole interaction. Password prompt (if needed) reuses the same
-# quickshell menu popup as the rest of this script via qs_menu_password.
+# quickshell menu popup as the rest of this script via qs_menu_password,
+# unless a password was already supplied inline (3rd arg).
 wifi_connect_or_disconnect() {
     ssid="$1"
+    password="$2"
     current=$(wifi_get_current)
-    if [[ "$ssid" == "$current" ]]; then
+    if [[ "$ssid" == "$current" && -z "$password" ]]; then
         wifi_disconnect
     else
-        wifi_connect "$ssid"
+        wifi_connect "$ssid" "$password"
     fi
+}
+
+# Forget (delete) a saved connection profile for an SSID
+wifi_forget() {
+    ssid="$1"
+    nmcli connection delete "$ssid" 2>/dev/null
+    echo "Forgot $ssid"
 }
 
 # Rescan for networks
@@ -161,7 +178,7 @@ wifi_network_menu() {
 
             ;;
         "Forget network")
-            nmcli connection delete "$ssid"
+            wifi_forget "$ssid"
             ;;
         $goback)
             echo "$goback"
