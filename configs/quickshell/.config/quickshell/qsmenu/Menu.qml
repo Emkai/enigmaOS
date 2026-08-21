@@ -285,6 +285,9 @@ Scope {
 
                     MouseArea {
                         anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: !row.isDivider
+                        onEntered: root.selectedIndex = row.index
                         onClicked: {
                             root.selectedIndex = row.index;
                             root.activate();

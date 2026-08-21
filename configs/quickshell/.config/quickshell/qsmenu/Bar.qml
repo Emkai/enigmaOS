@@ -209,7 +209,7 @@ Scope {
             conn_type=$(nmcli -t -f type,state,connection dev status 2>/dev/null | grep -E '^(wifi|ethernet):connected:' | head -n1 | cut -d: -f1)
             printf 'TYPE\\t%s\\n' "\${conn_type:-none}"
             if [[ "$conn_type" == "ethernet" ]]; then
-                dev=$(nmcli -t -f type,device,connection dev status | grep '^ethernet:connected:' | head -n1 | cut -d: -f2)
+                dev=$(nmcli -t -f type,state,device dev status | grep '^ethernet:connected:' | head -n1 | cut -d: -f3)
                 ip4=$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2; exit}')
                 gw=$(ip route 2>/dev/null | awk '/^default/{print $3; exit}')
                 printf 'ETH\\t%s\\t%s\\t%s\\n' "$dev" "\${ip4:-?}" "\${gw:-?}"
@@ -293,13 +293,13 @@ Scope {
     component Dropdown: PanelWindow {
         id: dd
         required property var barScreen
-        required property bool openState
+        required property var hover // HoverState driving this dropdown's open/close
         property int popupWidth: 260
         property string align: "right" // "left" | "right" | "center"
         default property alias content: col.data
 
         screen: barScreen
-        visible: openState
+        visible: hover.open
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
@@ -315,9 +315,12 @@ Scope {
         implicitWidth: popupWidth
         implicitHeight: col.implicitHeight + 20
 
-        MouseArea {
-            anchors.fill: parent
-            hoverEnabled: true
+        // HoverHandler (not MouseArea) so it keeps tracking hover even when the
+        // pointer is over a child MouseArea (e.g. MenuButton) stacked above it —
+        // MouseArea hover is exclusive to the topmost hoverEnabled item and would
+        // otherwise report a false exit, closing the dropdown while hovering a button.
+        HoverHandler {
+            onHoveredChanged: hovered ? dd.hover.enter() : dd.hover.leave()
         }
 
         Rectangle {
@@ -341,6 +344,37 @@ Scope {
         font.family: Theme.fontFamily
         font.pixelSize: 12
         font.letterSpacing: 1
+    }
+
+    // Bordered, hover-highlighted click target for dropdown rows/links.
+    component MenuButton: Rectangle {
+        id: btn
+        default property alias content: inner.data
+        // Discrete: no visible border/fill at rest, looks like plain text —
+        // only shows the button chrome on hover.
+        property bool discrete: false
+        signal clicked()
+        implicitHeight: 22
+        height: implicitHeight
+        opacity: enabled ? 1 : 0.4
+        radius: 3
+        border.width: 1
+        border.color: ma.containsMouse ? root.accent : (discrete ? "transparent" : root.hairline)
+        color: ma.containsMouse ? root.hoverBg : "transparent"
+
+        Item {
+            id: inner
+            anchors.fill: parent
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+        }
+
+        MouseArea {
+            id: ma
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: btn.clicked()
+        }
     }
 
 
@@ -436,7 +470,7 @@ Scope {
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsClock.open
+                    hover: hsClock
                     align: "left"
                     popupWidth: 236
 
@@ -531,22 +565,25 @@ Scope {
                         Repeater {
                             model: barWin.wsList
                             delegate: Rectangle {
+                                id: wsDelegate
                                 required property var modelData
                                 width: 22
                                 height: 20
                                 color: modelData.active
                                     ? (barWin.isFocusedMonitor ? root.accent : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35))
-                                    : "transparent"
+                                    : (wsMa.containsMouse ? root.hoverBg : "transparent")
                                 Text {
                                     anchors.centerIn: parent
-                                    text: modelData.id
+                                    text: wsDelegate.modelData.id
                                     color: "#ffffff"
                                     font.family: Theme.fontFamily
                                     font.pixelSize: 13
                                 }
                                 MouseArea {
+                                    id: wsMa
                                     anchors.fill: parent
-                                    onClicked: modelData.activate()
+                                    hoverEnabled: true
+                                    onClicked: wsDelegate.modelData.activate()
                                 }
                             }
                         }
@@ -575,7 +612,7 @@ Scope {
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsCpu.open
+                    hover: hsCpu
                     align: "center"
                     popupWidth: 260
 
@@ -593,7 +630,7 @@ Scope {
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsRam.open
+                    hover: hsRam
                     align: "center"
                     popupWidth: 260
 
@@ -650,7 +687,7 @@ Scope {
                     Rectangle {
                         width: kbText.implicitWidth + 16
                         height: root.barHeight
-                        color: "transparent"
+                        color: kbMa.containsMouse ? root.hoverBg : "transparent"
                         Text {
                             id: kbText
                             anchors.centerIn: parent
@@ -660,7 +697,9 @@ Scope {
                             font.pixelSize: 13
                         }
                         MouseArea {
+                            id: kbMa
                             anchors.fill: parent
+                            hoverEnabled: true
                             onClicked: {
                                 Quickshell.execDetached(["hyprctl", "switchxkblayout", "all", "next"]);
                                 refreshKbTimer.start();
@@ -775,7 +814,7 @@ Scope {
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsVpn.open
+                    hover: hsVpn
                     align: "right"
                     popupWidth: 300
 
@@ -800,55 +839,79 @@ Scope {
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsVol.open
+                    hover: hsVol
                     align: "right"
                     popupWidth: 292
 
-                    Row {
+                    Item {
                         width: parent.width
-                        Text { text: "OUTPUT"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12; font.letterSpacing: 1 }
-                        Item { width: parent.width - 100; height: 1 }
+                        height: 22
                         Text {
-                            text: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? "MUTED" : "MUTE"
-                            color: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? root.accent : root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: if (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio)
-                                    Pipewire.defaultAudioSink.audio.muted = !Pipewire.defaultAudioSink.audio.muted
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "OUTPUT"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12; font.letterSpacing: 1
+                        }
+                        MenuButton {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: muteText.implicitWidth + 16
+                            onClicked: if (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio)
+                                Pipewire.defaultAudioSink.audio.muted = !Pipewire.defaultAudioSink.audio.muted
+                            Text {
+                                id: muteText
+                                anchors.centerIn: parent
+                                text: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? "MUTED" : "MUTE"
+                                color: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? root.accent : root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
                             }
                         }
                     }
 
-                    Row {
+                    Item {
                         width: parent.width
-                        spacing: 3
-                        Repeater {
-                            model: 20
-                            delegate: Rectangle {
-                                required property int index
-                                width: (parent.width - 19 * 3) / 20
-                                height: 18
-                                color: (index + 1) * 5 <= root.volumePct() ? root.accent : "#161a1f"
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: if (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio) {
-                                        Pipewire.defaultAudioSink.audio.volume = (index + 1) * 0.05;
-                                        Pipewire.defaultAudioSink.audio.muted = false;
-                                    }
-                                }
+                        height: 18
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: height / 2
+                            color: "#161a1f"
+                            border.width: 1
+                            border.color: volMa.containsMouse ? root.accent : root.hairline
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            radius: height / 2
+                            width: Math.max(height, parent.width * root.volumePct() / 100)
+                            color: volMa.containsMouse ? Qt.lighter(root.accent, 1.15) : root.accent
+                        }
+
+                        MouseArea {
+                            id: volMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            function setFromX(x) {
+                                if (!Pipewire.defaultAudioSink || !Pipewire.defaultAudioSink.audio) return;
+                                const pct = Math.max(0, Math.min(1, x / width));
+                                Pipewire.defaultAudioSink.audio.volume = pct;
+                                Pipewire.defaultAudioSink.audio.muted = false;
                             }
+                            onPressed: mouse => setFromX(mouse.x)
+                            onPositionChanged: mouse => { if (pressed) setFromX(mouse.x); }
                         }
                     }
 
                     SectionLabel { text: "OUTPUT DEVICE"; topPadding: 4 }
                     Repeater {
                         model: Pipewire.nodes.values.filter(n => n.isSink && !n.isStream)
-                        delegate: Item {
+                        delegate: MenuButton {
                             required property var modelData
                             width: parent.width
-                            height: 20
+                            discrete: true
+                            onClicked: Pipewire.preferredDefaultAudioSink = modelData
                             Text {
                                 anchors.left: parent.left
                                 anchors.right: activeLabel.left
@@ -870,7 +933,6 @@ Scope {
                                 width: 60
                                 horizontalAlignment: Text.AlignRight
                             }
-                            MouseArea { anchors.fill: parent; onClicked: Pipewire.preferredDefaultAudioSink = modelData }
                         }
                     }
 
@@ -879,7 +941,8 @@ Scope {
                         model: Pipewire.nodes.values.filter(n => n.isStream && n.isSink && n.audio)
                         delegate: Row {
                             required property var modelData
-                            width: parent.width
+                            x: 8
+                            width: parent.width - 16
                             spacing: 8
                             Text {
                                 text: modelData.properties && modelData.properties["application.name"] ? modelData.properties["application.name"] : modelData.name
@@ -889,12 +952,38 @@ Scope {
                                 width: 84
                                 elide: Text.ElideRight
                             }
-                            Rectangle {
+                            Item {
                                 width: parent.width - 84 - 8 - 34
-                                height: 4
+                                height: 10
                                 anchors.verticalCenter: parent.verticalCenter
-                                color: "#161a1f"
-                                Rectangle { width: parent.width * modelData.audio.volume; height: 4; color: root.accent }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: height / 2
+                                    color: "#161a1f"
+                                    border.width: 1
+                                    border.color: appVolMa.containsMouse ? root.accent : root.hairline
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    radius: height / 2
+                                    width: Math.max(height, parent.width * modelData.audio.volume)
+                                    color: appVolMa.containsMouse ? Qt.lighter(root.accent, 1.15) : root.accent
+                                }
+
+                                MouseArea {
+                                    id: appVolMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    function setFromX(x) {
+                                        modelData.audio.volume = Math.max(0, Math.min(1, x / width));
+                                    }
+                                    onPressed: mouse => setFromX(mouse.x)
+                                    onPositionChanged: mouse => { if (pressed) setFromX(mouse.x); }
+                                }
                             }
                             Text {
                                 text: Math.round(modelData.audio.volume * 100) + "%"
@@ -907,40 +996,48 @@ Scope {
                         }
                     }
 
-                    Text {
-                        text: "pavucontrol · wpctl"
-                        color: root.textDimmer
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        topPadding: 8
-                        MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(["pavucontrol"]) }
+                    Item { width: 1; height: 4 }
+                    MenuButton {
+                        width: pavuText.implicitWidth + 16
+                        onClicked: Quickshell.execDetached(["pavucontrol"])
+                        Text {
+                            id: pavuText
+                            anchors.centerIn: parent
+                            text: "pavucontrol · wpctl"
+                            color: root.textDimmer
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                        }
                     }
                 }
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsBt.open
+                    hover: hsBt
                     align: "right"
                     popupWidth: 248
 
-                    Text {
-                        text: "BLUETOOTH · " + (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.enabled ? "ON" : "OFF")
-                        color: root.textDimmer
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        font.letterSpacing: 1
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: if (Bluetooth.defaultAdapter)
-                                Bluetooth.defaultAdapter.enabled = !Bluetooth.defaultAdapter.enabled
+                    MenuButton {
+                        width: parent.width
+                        onClicked: if (Bluetooth.defaultAdapter)
+                            Bluetooth.defaultAdapter.enabled = !Bluetooth.defaultAdapter.enabled
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "BLUETOOTH · " + (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.enabled ? "ON" : "OFF")
+                            color: root.textDimmer
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                            font.letterSpacing: 1
                         }
                     }
                     Repeater {
                         model: Bluetooth.devices.values.filter(d => d.paired || d.connected)
-                        delegate: Item {
+                        delegate: MenuButton {
                             required property var modelData
                             width: parent.width
-                            height: 20
+                            discrete: true
+                            onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
                             Text {
                                 anchors.left: parent.left
                                 anchors.right: statusLabel.left
@@ -962,25 +1059,42 @@ Scope {
                                 width: 90
                                 horizontalAlignment: Text.AlignRight
                             }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
-                            }
                         }
                     }
-                    Text {
-                        text: "bluetoothctl · scan on"
-                        color: root.textDimmer
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        topPadding: 8
-                        MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-bluetooth"]) }
+                    Item { width: 1; height: 4 }
+                    Row {
+                        spacing: 8
+                        MenuButton {
+                            width: btctlText.implicitWidth + 16
+                            onClicked: Quickshell.execDetached([root.repoScripts + "/qs-bluetooth"])
+                            Text {
+                                id: btctlText
+                                anchors.centerIn: parent
+                                text: "bluetoothctl"
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+                        }
+                        MenuButton {
+                            width: btScanText.implicitWidth + 16
+                            enabled: !(Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.discovering)
+                            onClicked: if (Bluetooth.defaultAdapter) Bluetooth.defaultAdapter.discovering = true
+                            Text {
+                                id: btScanText
+                                anchors.centerIn: parent
+                                text: (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.discovering) ? "scanning…" : "scan"
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                            }
+                        }
                     }
                 }
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsNet.open
+                    hover: hsNet
                     align: "right"
                     popupWidth: 300
 
@@ -1014,7 +1128,7 @@ Scope {
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
-                                width: parent.width - 90
+                                width: parent.width - 106
                             }
                             Text {
                                 text: modelData.security
@@ -1033,19 +1147,24 @@ Scope {
                             }
                         }
                     }
-                    Text {
-                        text: "nmtui / qs-wifi"
-                        color: root.textDimmer
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        topPadding: 8
-                        MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"]) }
+                    Item { width: 1; height: 4 }
+                    MenuButton {
+                        width: wifiLinkText.implicitWidth + 16
+                        onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"])
+                        Text {
+                            id: wifiLinkText
+                            anchors.centerIn: parent
+                            text: "nmtui / qs-wifi"
+                            color: root.textDimmer
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                        }
                     }
                 }
 
                 Dropdown {
                     barScreen: barWin.screen
-                    openState: hsPow.open
+                    hover: hsPow
                     align: "right"
                     popupWidth: 216
 
@@ -1067,10 +1186,10 @@ Scope {
                             { name: "reboot", key: "r", cmd: ["systemctl", "reboot"] },
                             { name: "power off", key: "p", cmd: ["systemctl", "poweroff"] }
                         ]
-                        delegate: Item {
+                        delegate: MenuButton {
                             required property var modelData
                             width: parent.width
-                            height: 20
+                            onClicked: Quickshell.execDetached(modelData.cmd)
                             Text {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
@@ -1081,7 +1200,6 @@ Scope {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.key; color: root.textFaint; font.family: Theme.fontFamily; font.pixelSize: 11
                             }
-                            MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(modelData.cmd) }
                         }
                     }
                 }

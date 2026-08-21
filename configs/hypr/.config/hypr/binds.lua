@@ -22,8 +22,9 @@ hl.bind(mainMod .. " + Y", hl.dsp.exec_cmd("/usr/bin/chromium --profile-director
 hl.bind(mainMod .. " + G", hl.dsp.exec_cmd("/usr/bin/chromium --profile-directory=Default --app=http://github.com"))
 
 -- hyprshot: plain region shot to file; +SHIFT pipes into satty for annotation
-hl.bind(mainMod .. " + CTRL + K", hl.dsp.exec_cmd('hyprshot -m region -o ~/Pictures/screenshots && notify-send "Screenshot taken"'))
-hl.bind(mainMod .. " + CTRL + SHIFT + K", hl.dsp.exec_cmd("hyprshot -m region --raw | satty --filename - --output-filename ~/Pictures/screenshots/%Y-%m-%d-%H%M%S_satty.png --early-exit --copy-command wl-copy"))
+-- -z/--freeze freezes the screen during selection so hovers/animations don't change before capture
+hl.bind(mainMod .. " + CTRL + K", hl.dsp.exec_cmd('hyprshot -z -m region -o ~/Pictures/screenshots && notify-send "Screenshot taken"'))
+hl.bind(mainMod .. " + CTRL + SHIFT + K", hl.dsp.exec_cmd("hyprshot -z -m region --raw | satty --filename - --output-filename ~/Pictures/screenshots/%Y-%m-%d-%H%M%S_satty.png --early-exit --copy-command wl-copy"))
 hl.bind(mainMod .. " + CTRL + V", hl.dsp.exec_cmd("~/src/enigmaOS/scripts/screen-recording.sh"))
 
 -- Dictation: press to start recording, press again to transcribe and type

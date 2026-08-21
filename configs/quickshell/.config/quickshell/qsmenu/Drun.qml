@@ -313,6 +313,8 @@ Scope {
 
                     MouseArea {
                         anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: root.selectedIndex = row.index
                         onClicked: {
                             root.selectedIndex = row.index;
                             root.launch();
