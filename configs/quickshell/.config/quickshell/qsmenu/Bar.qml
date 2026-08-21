@@ -372,6 +372,7 @@ Scope {
 
             // ---- Workspaces (native Hyprland IPC, filtered to this monitor) ----
             property var wsList: []
+            property bool isFocusedMonitor: Hyprland.focusedMonitor && Hyprland.focusedMonitor.name === barWin.screen.name
             function refreshWorkspaces() {
                 const mine = Hyprland.workspaces.values.filter(w => w.monitor && w.monitor.name === barWin.screen.name);
                 mine.sort((a, b) => a.id - b.id);
@@ -385,6 +386,7 @@ Scope {
             Connections {
                 target: Hyprland
                 function onFocusedWorkspaceChanged() { barWin.refreshWorkspaces(); }
+                function onFocusedMonitorChanged() { barWin.refreshWorkspaces(); }
             }
 
             Rectangle {
@@ -532,7 +534,9 @@ Scope {
                                 required property var modelData
                                 width: 22
                                 height: 20
-                                color: modelData.active ? root.accent : "transparent"
+                                color: modelData.active
+                                    ? (barWin.isFocusedMonitor ? root.accent : Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.35))
+                                    : "transparent"
                                 Text {
                                     anchors.centerIn: parent
                                     text: modelData.id
