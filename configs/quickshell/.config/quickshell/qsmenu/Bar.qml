@@ -199,8 +199,10 @@ Scope {
     }
 
     // ---- Network details (ip/gateway/link + wifi list), via nmcli/ip ----
-    property string netKind: "none" // "wired" | "wifi" | "none"
-    property var netWired: null
+    property string netKind: "none" // "ethernet" | "wifi" | "none"
+    property var netWiredList: []
+    property var netVpnList: []
+    property var netWifiDevList: []
     property var netWifiList: []
     property string wifiExpandedSsid: ""
     property bool wifiExpandedNeedsPassword: false
@@ -211,12 +213,30 @@ Scope {
         command: ["bash", "-c", `
             conn_type=$(nmcli -t -f type,state,connection dev status 2>/dev/null | grep -E '^(wifi|ethernet):connected:' | head -n1 | cut -d: -f1)
             printf 'TYPE\\t%s\\n' "\${conn_type:-none}"
-            if [[ "$conn_type" == "ethernet" ]]; then
-                dev=$(nmcli -t -f type,state,device dev status | grep '^ethernet:connected:' | head -n1 | cut -d: -f3)
+            nmcli -t -f type,state,device dev status 2>/dev/null | grep '^ethernet:connected:' | cut -d: -f3 | while read -r dev; do
+                gw=$(ip -4 route list default dev "$dev" 2>/dev/null | awk '/via/{print $3; exit}')
+                printf 'ETH\\t%s\\t%s\\n' "$dev" "\${gw:-?}"
+                # One line per address; the kernel flags DHCP-leased addresses
+                # "dynamic" (finite lease lifetime), statics are permanent.
+                ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{
+                    kind = "static"
+                    for (i = 5; i <= NF; i++) if ($i == "dynamic") kind = "dhcp"
+                    print "ETHADDR\\t" $2 "\\t" $4 "\\t" kind
+                }'
+            done
+            nmcli -t -f type,state,device,connection dev status 2>/dev/null | grep '^wifi:connected:' | while IFS=: read -r _ _ dev conn; do
                 ip4=$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2; exit}')
-                gw=$(ip route 2>/dev/null | awk '/^default/{print $3; exit}')
-                printf 'ETH\\t%s\\t%s\\t%s\\n' "$dev" "\${ip4:-?}" "\${gw:-?}"
-            fi
+                gw=$(ip -4 route list default dev "$dev" 2>/dev/null | awk '/via/{print $3; exit}')
+                printf 'WIFIDEV\\t%s\\t%s\\t%s\\t%s\\n' "$dev" "\${ip4:-?}" "\${gw:-?}" "$conn"
+            done
+            # VPN tunnels: wireguard interfaces plus tun (tailscale/openvpn)
+            for t in wireguard tun; do
+                ip -o link show type "$t" up 2>/dev/null | awk -F': ' '{print $2}'
+            done | while read -r dev; do
+                ip4=$(ip -4 addr show "$dev" 2>/dev/null | awk '/inet /{print $2; exit}')
+                routes=$(ip -4 route list dev "$dev" 2>/dev/null | awk '{print $1}' | paste -sd ',' - | sed 's/,/, /g')
+                printf 'VPN\\t%s\\t%s\\t%s\\n' "$dev" "\${ip4:-?}" "\${routes:--}"
+            done
             nmcli -t -f active,ssid,signal,security dev wifi 2>/dev/null | while IFS=: read -r active ssid signal sec; do
                 [[ -z "$ssid" ]] && continue
                 printf 'WIFI\\t%s\\t%s\\t%s\\t%s\\n' "$active" "$ssid" "$signal" "\${sec:-open}"
@@ -226,7 +246,10 @@ Scope {
         stdout: StdioCollector {
             id: netCollector
             onStreamFinished: {
-                let kind = "none", wired = null;
+                let kind = "none";
+                const wired = [];
+                const vpn = [];
+                const wifiDevs = [];
                 const wifi = [];
                 const saved = new Set();
                 for (const line of netCollector.text.split("\n")) {
@@ -236,12 +259,20 @@ Scope {
                 for (const line of netCollector.text.split("\n")) {
                     const p = line.split("\t");
                     if (p[0] === "TYPE") kind = p[1];
-                    else if (p[0] === "ETH") wired = { dev: p[1], ip4: p[2], gw: p[3] };
+                    else if (p[0] === "ETH") wired.push({ dev: p[1], gw: p[2], addrs: [] });
+                    else if (p[0] === "ETHADDR") {
+                        const w = wired.find(x => x.dev === p[1]);
+                        if (w) w.addrs.push({ cidr: p[2], kind: p[3] });
+                    }
+                    else if (p[0] === "VPN") vpn.push({ dev: p[1], ip4: p[2], routes: p[3] });
+                    else if (p[0] === "WIFIDEV") wifiDevs.push({ dev: p[1], ip4: p[2], gw: p[3], conn: p[4] });
                     else if (p[0] === "WIFI") wifi.push({ active: p[1] === "yes", ssid: p[2], signal: p[3], security: p[4], saved: saved.has(p[2]) });
                 }
                 root.netKind = kind;
-                root.netWired = wired;
-                root.netWifiList = wifi;
+                root.netWiredList = wired;
+                root.netVpnList = vpn;
+                root.netWifiDevList = wifiDevs;
+                root.netWifiList = wifi.filter(w => w.active).concat(wifi.filter(w => !w.active));
             }
         }
     }
@@ -783,7 +814,7 @@ Scope {
                         color: hsNet.open ? root.hoverBg : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: root.netKind === "wired" ? "" : ""
+                            text: root.netKind === "ethernet" ? "" : ""
                             color: root.textDefault
                             font.family: Theme.fontFamily
                             font.pixelSize: 15
@@ -1114,20 +1145,35 @@ Scope {
                     popupWidth: 380
                     wantsKeyboard: root.wifiExpandedSsid !== "" && root.wifiExpandedNeedsPassword
 
-                    Column {
-                        width: parent.width
-                        visible: root.netWired !== null
-                        spacing: 4
-                        SectionLabel { text: "WIRED · " + (root.netWired ? root.netWired.dev : "") }
-                        Row {
+                    Repeater {
+                        model: root.netWiredList
+                        delegate: Column {
+                            required property var modelData
+                            required property int index
                             width: parent.width
-                            Text { text: "ipv4"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
-                            Text { text: root.netWired ? root.netWired.ip4 : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
-                        }
-                        Row {
-                            width: parent.width
-                            Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
-                            Text { text: root.netWired ? root.netWired.gw : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                            spacing: 4
+                            SectionLabel { text: "WIRED · " + modelData.dev; topPadding: index > 0 ? 6 : 0 }
+                            Repeater {
+                                model: modelData.addrs
+                                delegate: Row {
+                                    required property var modelData
+                                    width: parent.width
+                                    Text { text: modelData.kind; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 150 }
+                                    Text { text: modelData.cidr; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 150; horizontalAlignment: Text.AlignRight }
+                                }
+                            }
+                            Text {
+                                visible: modelData.addrs.length === 0
+                                text: "no ipv4 address"
+                                color: root.textFaint
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            Row {
+                                width: parent.width
+                                Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
+                                Text { text: modelData.gw; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                            }
                         }
                     }
 
@@ -1139,12 +1185,21 @@ Scope {
                             id: wifiRow
                             required property var modelData
                             readonly property bool expanded: root.wifiExpandedSsid === modelData.ssid
+                            // Interface details for the connected network: match the NM
+                            // connection name to the SSID, fall back to the first wifi device.
+                            readonly property var devInfo: modelData.active
+                                ? (root.netWifiDevList.find(d => d.conn === modelData.ssid) || root.netWifiDevList[0] || null)
+                                : null
                             width: parent.width
                             spacing: 0
 
                             MenuButton {
                                 width: parent.width
                                 discrete: true
+                                // The connected network's actions are always shown below it,
+                                // so its row is a plain label: no hover chrome, no click.
+                                enabled: !modelData.active
+                                opacity: 1
                                 onClicked: {
                                     root.wifiExpandedSsid = wifiRow.expanded ? "" : modelData.ssid;
                                     root.wifiExpandedNeedsPassword = !modelData.saved;
@@ -1181,6 +1236,49 @@ Scope {
                                     font.pixelSize: 12
                                     width: 40
                                     horizontalAlignment: Text.AlignRight
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                visible: wifiRow.devInfo !== null
+                                spacing: 4
+                                topPadding: 2
+                                bottomPadding: 4
+                                // Match MenuButton's 8px content inset on the right so the
+                                // values line up with the signal column; indent deeper on
+                                // the left to read as nested under the connection row.
+                                leftPadding: 16
+                                rightPadding: 8
+                                Row {
+                                    width: parent.width - parent.leftPadding - parent.rightPadding
+                                    Text { text: "ipv4 · " + (wifiRow.devInfo ? wifiRow.devInfo.dev : ""); color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 140 }
+                                    Text { text: wifiRow.devInfo ? wifiRow.devInfo.ip4 : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 140; horizontalAlignment: Text.AlignRight }
+                                }
+                                Row {
+                                    width: parent.width - parent.leftPadding - parent.rightPadding
+                                    Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 140 }
+                                    Text { text: wifiRow.devInfo ? wifiRow.devInfo.gw : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 140; horizontalAlignment: Text.AlignRight }
+                                }
+                                Row {
+                                    spacing: 6
+                                    MenuButton {
+                                        width: 72
+                                        onClicked: {
+                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--disconnect"]);
+                                            wifiRefreshTimer.restart();
+                                        }
+                                        Text { anchors.centerIn: parent; text: "disconnect"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                                    }
+                                    MenuButton {
+                                        width: 56
+                                        visible: modelData.saved
+                                        onClicked: {
+                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", modelData.ssid]);
+                                            wifiRefreshTimer.restart();
+                                        }
+                                        Text { anchors.centerIn: parent; text: "forget"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                                    }
                                 }
                             }
 
@@ -1285,6 +1383,26 @@ Scope {
                             }
                         }
                     }
+                    Repeater {
+                        model: root.netVpnList
+                        delegate: Column {
+                            required property var modelData
+                            width: parent.width
+                            spacing: 4
+                            SectionLabel { text: "VPN · " + modelData.dev; topPadding: 6 }
+                            Row {
+                                width: parent.width
+                                Text { text: "ipv4"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
+                                Text { text: modelData.ip4; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                            }
+                            Row {
+                                width: parent.width
+                                Text { text: "routes"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 60 }
+                                Text { text: modelData.routes; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 60; horizontalAlignment: Text.AlignRight; wrapMode: Text.Wrap }
+                            }
+                        }
+                    }
+
                     Item { width: 1; height: 4 }
                     Row {
                         spacing: 8

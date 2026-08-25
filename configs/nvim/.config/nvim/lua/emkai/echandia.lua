@@ -274,7 +274,7 @@ function M.deploy()
     local version_var = "echandia_" .. repo .. "_version"
 
     M.ensure_var("echandia_deploy_host", "Deploy host: ", "", function(host)
-        local function run_with_version(arch)
+        local function run_with_version(arch, deploy_type)
             M.ensure_var(version_var, "Version (" .. repo .. "): ", "99.99.99.01", function(version)
                 local cmd
                 if repo == "bms" then
@@ -288,12 +288,16 @@ function M.deploy()
                     )
                 else
                     cmd = string.format(
-                        "%s/deploy_escu.sh %s -s %s -v %s",
+                        "%s/deploy_escu.sh %s -s %s -v %s -t %s",
                         SCRIPTS_DIR,
                         vim.fn.shellescape(host),
                         vim.fn.shellescape(cwd),
-                        vim.fn.shellescape(version)
+                        vim.fn.shellescape(version),
+                        vim.fn.shellescape(deploy_type)
                     )
+                    if arch then
+                        cmd = cmd .. " -a " .. vim.fn.shellescape(arch)
+                    end
                 end
                 M.run_in_float(cmd, function()
                     M.bump_version(version_var)
@@ -303,10 +307,22 @@ function M.deploy()
 
         if repo == "bms" then
             M.ensure_var("echandia_deploy_arch", "Arch: ", "amd64", function(arch)
-                run_with_version(arch)
+                run_with_version(arch, nil)
             end)
         else
-            run_with_version(nil)
+            -- Deploy artifact follows the build mode: firmware ships the
+            -- production binary, either sil mode ships the SIL docker image
+            -- (deploy always builds what it ships, so sil_local still
+            -- deploys the image).
+            M.ensure_build_mode("escu", function(mode)
+                if mode == "firmware" then
+                    run_with_version(nil, "fw")
+                else
+                    M.ensure_var("echandia_deploy_arch", "Arch: ", "amd64", function(arch)
+                        run_with_version(arch, "sil")
+                    end)
+                end
+            end)
         end
     end)
 end
@@ -454,14 +470,17 @@ function M.build()
     else
         M.ensure_build_mode("escu", function(mode)
             if mode == "sil_docker" then
-                M.ensure_var("echandia_escu_version", "Version (escu): ", "99.99.99.01", function(version)
-                    local cmd = string.format(
-                        "%s/build_escu.sh -s %s -d -v %s",
-                        SCRIPTS_DIR,
-                        vim.fn.shellescape(cwd),
-                        vim.fn.shellescape(version)
-                    )
-                    M.run_in_float(cmd)
+                M.ensure_var("echandia_deploy_arch", "Arch: ", "amd64", function(arch)
+                    M.ensure_var("echandia_escu_version", "Version (escu): ", "99.99.99.01", function(version)
+                        local cmd = string.format(
+                            "%s/build_escu.sh -s %s -d -v %s -a %s",
+                            SCRIPTS_DIR,
+                            vim.fn.shellescape(cwd),
+                            vim.fn.shellescape(version),
+                            vim.fn.shellescape(arch)
+                        )
+                        M.run_in_float(cmd)
+                    end)
                 end)
             elseif mode == "sil_local" then
                 local cmd = string.format(

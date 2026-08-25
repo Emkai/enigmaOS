@@ -31,6 +31,8 @@ fuse2
 mermaid-cli
 opencode
 qemu-full
+qemu-user-static
+qemu-user-static-binfmt
 nvtop
 ollama-cuda
 solaar

@@ -36,3 +36,4 @@ text/plain=nvim-kitty.desktop
 text/markdown=nvim-kitty.desktop
 text/x-shellscript=nvim-kitty.desktop
 application/x-shellscript=nvim-kitty.desktop
+x-scheme-handler/rpi-imager=com.raspberrypi.rpi-imager-uri-handler.desktop
