@@ -36,6 +36,17 @@ match_description_using_regex = true
 description = "DELL P2723DE 466F714"
 match_description_using_regex = true
 
+# Echandia lab standing desk (Samsung LS27D60xU, lab unit) -> monitor on the
+# left, laptop panel on the right. Matched by serial so it never collides with
+# the home single-monitor profile.
+[profiles.echandia-lab-standing]
+config_file = "hyprconfigs/echandia-lab-standing.lua"
+config_file_type = "static"
+
+[[profiles.echandia-lab-standing.conditions.required_monitors]]
+description = "Samsung Electric Company LS27D60xU HK2Y400056"
+match_description_using_regex = true
+
 # Single external (Samsung LS27D60xU) -> laptop panel stays on, monitor to its left.
 [profiles.single-monitor]
 config_file = "hyprconfigs/single-monitor.lua"
