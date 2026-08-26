@@ -239,6 +239,14 @@ rdp_remove() {
     echo "rdp: removed '$name'"
 }
 
+# Desktop notification for connect failures. The qs-rdp menu launches
+# connections detached with stderr discarded, so this is the only way a
+# failure becomes visible there. No-op if notify-send is missing.
+rdp_notify_fail() {
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send -u critical "RDP" "$1" 2>/dev/null || true
+}
+
 # Find a free local port for the SSH SOCKS tunnel. A /dev/tcp connect that
 # fails means nothing is listening there.
 rdp_free_port() {
@@ -293,6 +301,7 @@ rdp_connect() {
             fi
             lport="$(rdp_free_port)" || {
                 echo "rdp: no free local port for the SSH tunnel" >&2
+                rdp_notify_fail "'$name': no free local port for the SSH tunnel"
                 return 1
             }
             tunnel_cmd=(ssh -N -D "127.0.0.1:$lport" -o ExitOnForwardFailure=yes)
@@ -341,6 +350,7 @@ rdp_connect() {
         for ((i = 0; i < 300; i++)); do
             if ! kill -0 "$tunnel_pid" 2>/dev/null; then
                 echo "rdp: SSH tunnel via '$ssh_dest' failed" >&2
+                rdp_notify_fail "'$name': SSH tunnel via '$ssh_dest' failed"
                 trap - EXIT
                 return 1
             fi
@@ -352,18 +362,32 @@ rdp_connect() {
         done
         if [[ -z "$ok" ]]; then
             echo "rdp: SSH tunnel via '$ssh_dest' did not come up in time" >&2
+            rdp_notify_fail "'$name': SSH tunnel via '$ssh_dest' did not come up in time"
             kill "$tunnel_pid" 2>/dev/null
             trap - EXIT
             return 1
         fi
     fi
 
-    local rc=0
-    printf '%s\n' "$password" | xfreerdp3 "${args[@]}" || rc=$?
+    # stderr goes through a temp file (replayed below) so a failure reason can
+    # be pulled out for the notification — the detached menu launch discards
+    # our stderr, so this is the only place it survives.
+    local rc=0 errfile
+    errfile="$(mktemp)"
+    printf '%s\n' "$password" | xfreerdp3 "${args[@]}" 2>"$errfile" || rc=$?
+    cat "$errfile" >&2
     if [[ -n "$tunnel_pid" ]]; then
         kill "$tunnel_pid" 2>/dev/null
         trap - EXIT
     fi
+    if (( rc != 0 )); then
+        local reason
+        reason="$(grep -F '[ERROR]' "$errfile" | tail -n 1 \
+            | sed -E 's/^\[[^]]*\] \[[^]]*\] \[ERROR\]\[[^]]*\] - +//' || true)"
+        [[ -z "$reason" ]] && reason="$(grep -v '^[[:space:]]*$' "$errfile" | tail -n 1 || true)"
+        rdp_notify_fail "'$name' failed (exit $rc)${reason:+: $reason}"
+    fi
+    rm -f "$errfile"
     return "$rc"
 }
 
