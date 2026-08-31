@@ -20,6 +20,20 @@ Scope {
 
     readonly property int rowHeight: 32
 
+    // Hover may only move the selection after real pointer motion. Refiltering
+    // (and keyboard scrolling) puts new rows under a stationary cursor, which
+    // makes Qt fire synthetic hover events on them; those arrive at an
+    // unchanged scene position and must not steal the selection from row 0.
+    property point hoverPos: Qt.point(0, 0)
+    property bool hoverKnown: false
+
+    function hoverSelect(index, pos) {
+        if (hoverKnown && (pos.x !== hoverPos.x || pos.y !== hoverPos.y))
+            selectedIndex = index;
+        hoverPos = pos;
+        hoverKnown = true;
+    }
+
     // wofi -M fuzzy equivalent: query chars must appear in order, case-insensitive
     function fuzzyMatch(query, entry) {
         const q = query.toLowerCase();
@@ -120,7 +134,12 @@ Scope {
         implicitWidth: 720
         implicitHeight: Theme.headerHeight + root.lines * root.rowHeight + Theme.footerHeight + 2
 
-        onVisibleChanged: if (visible) searchInput.forceActiveFocus()
+        onVisibleChanged: {
+            if (visible) {
+                root.hoverKnown = false; // the row under the resting cursor must not grab selection on open
+                searchInput.forceActiveFocus();
+            }
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -287,7 +306,8 @@ Scope {
                         anchors.fill: parent
                         hoverEnabled: true
                         enabled: !row.isDivider
-                        onEntered: root.selectedIndex = row.index
+                        onEntered: root.hoverSelect(row.index, mapToItem(null, mouseX, mouseY))
+                        onPositionChanged: mouse => root.hoverSelect(row.index, mapToItem(null, mouse.x, mouse.y))
                         onClicked: {
                             root.selectedIndex = row.index;
                             root.activate();

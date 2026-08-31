@@ -19,6 +19,19 @@ Scope {
     readonly property int rowHeight: 36
     readonly property int maxRows: 12
 
+    // Hover may only move the selection after real pointer motion; see the
+    // matching comment in Menu.qml (synthetic hover events after a refilter
+    // arrive at an unchanged scene position and must not steal the selection).
+    property point hoverPos: Qt.point(0, 0)
+    property bool hoverKnown: false
+
+    function hoverSelect(index, pos) {
+        if (hoverKnown && (pos.x !== hoverPos.x || pos.y !== hoverPos.y))
+            selectedIndex = index;
+        hoverPos = pos;
+        hoverKnown = true;
+    }
+
     // Same subsequence matching as Menu.qml's wofi -M fuzzy equivalent.
     function fuzzyMatch(query, entry) {
         const q = query.toLowerCase();
@@ -130,7 +143,12 @@ Scope {
         implicitWidth: 720
         implicitHeight: Theme.headerHeight + root.maxRows * root.rowHeight + Theme.footerHeight + 2
 
-        onVisibleChanged: if (visible) searchInput.forceActiveFocus()
+        onVisibleChanged: {
+            if (visible) {
+                root.hoverKnown = false; // the row under the resting cursor must not grab selection on open
+                searchInput.forceActiveFocus();
+            }
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -314,7 +332,8 @@ Scope {
                     MouseArea {
                         anchors.fill: parent
                         hoverEnabled: true
-                        onEntered: root.selectedIndex = row.index
+                        onEntered: root.hoverSelect(row.index, mapToItem(null, mouseX, mouseY))
+                        onPositionChanged: mouse => root.hoverSelect(row.index, mapToItem(null, mouse.x, mouse.y))
                         onClicked: {
                             root.selectedIndex = row.index;
                             root.launch();
