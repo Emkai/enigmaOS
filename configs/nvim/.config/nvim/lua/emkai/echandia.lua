@@ -136,6 +136,30 @@ function M.set_launch_docker()
     )
 end
 
+function M.set_launch_metrics()
+    vim.ui.input(
+        { prompt = "Launch metrics stack: ", default = vim.g.echandia_launch_metrics or "false" },
+        function(v)
+            if not v or v == "" then
+                return
+            end
+            vim.g.echandia_launch_metrics = v
+        end
+    )
+end
+
+function M.set_launch_hardware()
+    vim.ui.input(
+        { prompt = "Launch against hardware: ", default = vim.g.echandia_launch_hardware or "false" },
+        function(v)
+            if not v or v == "" then
+                return
+            end
+            vim.g.echandia_launch_hardware = v
+        end
+    )
+end
+
 function M.set_launch_gen_config()
     vim.ui.input(
         { prompt = "Generate config on launch: ", default = vim.g.echandia_launch_gen_config or "false" },
@@ -259,7 +283,11 @@ function M.run_in_float(cmd, on_success)
             vim.api.nvim_win_close(win, true)
         end
     end
-    vim.keymap.set({ "n", "t" }, "q", close, opts)
+    -- Normal mode only: the launched command may read stdin (sudo password
+    -- prompt), so every key must pass through while in terminal mode. Nvim
+    -- drops to normal mode when the process exits, where q/Esc close as
+    -- before; mid-run it's <C-\><C-n> then q.
+    vim.keymap.set("n", "q", close, opts)
     vim.keymap.set("n", "<Esc>", close, opts)
     vim.cmd("startinsert")
 end
@@ -630,6 +658,9 @@ function M.launch_sil()
                 vim.fn.shellescape(tostring(scus)),
                 vim.fn.shellescape(pw)
             )
+            if vim.g.echandia_launch_hardware == "true" then
+                cmd = cmd .. " -w"
+            end
             M.run_in_float(cmd)
         end)
     end)
@@ -651,7 +682,12 @@ function M.launch()
         local use_docker = vim.g.echandia_launch_docker == "true"
         local gen = gen_config == "true"
         if repo == "bms" then
-            cmd = string.format("%s/launch_bms.sh -s %s -m", SCRIPTS_DIR, vim.fn.shellescape(cwd .. "/EBMS"))
+            cmd = string.format("%s/launch_bms.sh -s %s", SCRIPTS_DIR, vim.fn.shellescape(cwd .. "/EBMS"))
+            -- Metrics stack (Victoria Metrics + OTel + Grafana) is docker-only
+            -- and launch_bms.sh aborts if docker is down, so it's opt-in.
+            if vim.g.echandia_launch_metrics == "true" then
+                cmd = cmd .. " -m"
+            end
             if gen then
                 cmd = cmd .. " -g"
                 local scus = vim.g.echandia_bms_scus
@@ -695,6 +731,8 @@ M.keymaps = {
     { lhs = "ev", fn = M.set_version,           repos = { "bms", "escu", "sil" }, desc = "Echandia set deploy version" },
     { lhs = "ea", fn = M.set_bundle_arch,       repos = { "sil" },                desc = "Echandia set bundle arch (sil)" },
     { lhs = "ep", fn = M.set_launch_docker,     repos = { "bms", "escu" },        desc = "Echandia set use docker for launch" },
+    { lhs = "em", fn = M.set_launch_metrics,    repos = { "bms" },                desc = "Echandia set metrics stack on launch (bms)" },
+    { lhs = "ew", fn = M.set_launch_hardware,   repos = { "sil" },                desc = "Echandia set hardware mode on launch (sil)" },
     { lhs = "eG", fn = M.set_launch_gen_config, repos = { "bms", "escu" },        desc = "Echandia set gen-config on launch" },
 }
 
