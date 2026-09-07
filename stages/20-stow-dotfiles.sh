@@ -5,6 +5,14 @@ ENIGMA_ROOT="${ENIGMA_ROOT:?ENIGMA_ROOT not set - run via install.sh}"
 source "$ENIGMA_ROOT/lib/common.sh"
 
 configs_dir="$ENIGMA_ROOT/configs"
+
+# systemd does not read unit drop-ins through a symlinked *.d directory, and
+# stow "folds" a directory that does not yet exist in the target into a single
+# symlink. Pre-create every systemd drop-in directory shipped by a package so
+# stow places per-file symlinks inside a real directory instead.
+while IFS= read -r -d '' dropin_dir; do
+    mkdir -p "$HOME/.config/${dropin_dir#*/.config/}"
+done < <(find "$configs_dir" -type d -path '*/.config/systemd/user/*.d' -print0)
 dry_run_log=$(mktemp)
 trap 'rm -f "$dry_run_log"' EXIT
 

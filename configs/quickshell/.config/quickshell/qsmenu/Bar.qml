@@ -330,11 +330,20 @@ Scope {
     }
 
     // ---- Reusable dropdown popup window ----
+    //
+    // Width follows the content: the widest row's natural (un-elided) width,
+    // clamped to [minWidth, maxWidth]. See naturalWidth() for how rows are
+    // measured. A row that should widen the popup around it (device names,
+    // SSIDs) sets an explicit implicitWidth built from its texts' implicitWidth
+    // and fixed-width status columns — never from its own width, which follows
+    // the popup and would loop, and never from a value that changes while the
+    // popup is open (volume %, signal %), which would make it jitter.
     component Dropdown: PanelWindow {
         id: dd
         required property var barScreen
         required property var hover // HoverState driving this dropdown's open/close
-        property int popupWidth: 260
+        property int minWidth: 220
+        property int maxWidth: Math.min(720, Math.round(screenWidth * 0.6))
         property string align: "right" // "left" | "right" | "center"
         // Dropdowns open on hover, so they don't grab keyboard focus by default
         // (that would steal it from whatever app the user is typing in just from
@@ -342,6 +351,9 @@ Scope {
         // input the user asked to type into (e.g. the wifi password field).
         property bool wantsKeyboard: false
         default property alias content: col.data
+        // barScreen is briefly null while a monitor is being unplugged; don't
+        // spam TypeErrors from the size/position bindings during that window.
+        readonly property int screenWidth: barScreen ? barScreen.width : 0
 
         screen: barScreen
         visible: hover.open
@@ -356,10 +368,51 @@ Scope {
             right: align === "right"
         }
         margins.top: root.dropdownTopMargin
-        margins.left: align === "center" ? Math.round((barScreen.width - popupWidth) / 2) : 12
+        margins.left: align === "center" ? Math.round((screenWidth - implicitWidth) / 2) : 12
         margins.right: 12
-        implicitWidth: popupWidth
+        implicitWidth: Math.max(minWidth, Math.min(maxWidth, contentWidth + 2 * col.x))
         implicitHeight: col.implicitHeight + 20
+
+        // Natural width of an item tree. Positioners (Row/Column/Grid/Flow) can't
+        // report one: their implicitWidth is read-only and tracks their children's
+        // *actual* widths, which already follow the popup — reading it would be
+        // circular. So a Row sums its children, a Column takes its widest, and a
+        // Grid/Flow is skipped (its cells are sized from the popup). Wrapping text
+        // is skipped too: it adapts to the popup rather than sizing it. Anything
+        // else reports its implicitWidth: a Text's is its full unelided width, an
+        // Item's/Rectangle's is 0 unless set explicitly.
+        function naturalWidth(item) {
+            if (!item.visible)
+                return 0;
+            if (item instanceof Grid || item instanceof Flow)
+                return 0;
+            if (item instanceof Text && item.wrapMode !== Text.NoWrap)
+                return 0;
+            if (item instanceof Row) {
+                let w = 0, n = 0;
+                for (let i = 0; i < item.children.length; i++) {
+                    if (!item.children[i].visible)
+                        continue;
+                    w += naturalWidth(item.children[i]);
+                    n++;
+                }
+                return w + Math.max(0, n - 1) * item.spacing + item.leftPadding + item.rightPadding;
+            }
+            if (item instanceof Column) {
+                let w = 0;
+                for (let i = 0; i < item.children.length; i++)
+                    w = Math.max(w, naturalWidth(item.children[i]));
+                return w + item.leftPadding + item.rightPadding;
+            }
+            return item.implicitWidth;
+        }
+
+        readonly property int contentWidth: {
+            let w = 0;
+            for (let i = 0; i < col.children.length; i++)
+                w = Math.max(w, naturalWidth(col.children[i]));
+            return Math.ceil(w);
+        }
 
         // HoverHandler (not MouseArea) so it keeps tracking hover even when the
         // pointer is over a child MouseArea (e.g. MenuButton) stacked above it —
@@ -399,6 +452,7 @@ Scope {
         // Discrete: no visible border/fill at rest, looks like plain text —
         // only shows the button chrome on hover.
         property bool discrete: false
+        readonly property int contentInset: 8 // horizontal padding around content
         signal clicked()
         implicitHeight: 22
         height: implicitHeight
@@ -411,8 +465,8 @@ Scope {
         Item {
             id: inner
             anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
+            anchors.leftMargin: btn.contentInset
+            anchors.rightMargin: btn.contentInset
         }
 
         MouseArea {
@@ -518,7 +572,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsClock
                     align: "left"
-                    popupWidth: 236
+                    minWidth: 236
 
                     Row {
                         width: parent.width
@@ -660,7 +714,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsCpu
                     align: "center"
-                    popupWidth: 260
+                    minWidth: 260
 
                     SectionLabel { text: "CPU BY PROCESS" }
                     Repeater {
@@ -678,7 +732,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsRam
                     align: "center"
-                    popupWidth: 260
+                    minWidth: 260
 
                     SectionLabel { text: "MEMORY BY PROCESS" }
                     Repeater {
@@ -862,7 +916,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsVpn
                     align: "right"
-                    popupWidth: 300
+                    minWidth: 300
 
                     SectionLabel { text: "VPN INTERFACES" }
                     Repeater {
@@ -884,10 +938,27 @@ Scope {
                 }
 
                 Dropdown {
+                    id: volDropdown
                     barScreen: barWin.screen
                     hover: hsVol
                     align: "right"
-                    popupWidth: 292
+                    minWidth: 292
+
+                    readonly property var appStreams: Pipewire.nodes.values.filter(n => n.isStream && n.isSink && n.audio)
+                    function appName(n) {
+                        return n.properties && n.properties["application.name"] ? n.properties["application.name"] : n.name;
+                    }
+                    // One name column shared by all application rows so their sliders
+                    // line up, sized to the longest name (monospace font, so the
+                    // longest by character count is the widest) and capped so one
+                    // absurd name can't eat the whole popup.
+                    TextMetrics {
+                        id: appNameMetrics
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                        text: volDropdown.appStreams.map(n => volDropdown.appName(n)).reduce((a, b) => b.length > a.length ? b : a, "")
+                    }
+                    readonly property int appNameColWidth: Math.min(Math.ceil(appNameMetrics.advanceWidth) + 1, 240)
 
                     Item {
                         width: parent.width
@@ -956,11 +1027,15 @@ Scope {
                         delegate: MenuButton {
                             required property var modelData
                             width: parent.width
+                            // Full device name + status column: the popup widens to fit.
+                            implicitWidth: sinkName.implicitWidth + 8 + activeLabel.width + 2 * contentInset
                             discrete: true
                             onClicked: Pipewire.preferredDefaultAudioSink = modelData
                             Text {
+                                id: sinkName
                                 anchors.left: parent.left
                                 anchors.right: activeLabel.left
+                                anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.description || modelData.name
                                 color: modelData === Pipewire.defaultAudioSink ? root.textBright : root.textDefault
@@ -984,22 +1059,32 @@ Scope {
 
                     SectionLabel { text: "APPLICATIONS"; topPadding: 8 }
                     Repeater {
-                        model: Pipewire.nodes.values.filter(n => n.isStream && n.isSink && n.audio)
-                        delegate: Row {
+                        model: volDropdown.appStreams
+                        delegate: Item {
+                            id: appRow
                             required property var modelData
                             x: 8
                             width: parent.width - 16
-                            spacing: 8
+                            height: appName.implicitHeight
+                            // Name column + room for a usable slider; the % column is
+                            // fixed-width so a changing volume can't resize the popup.
+                            implicitWidth: 16 + volDropdown.appNameColWidth + 8 + 80 + 8 + appPct.width
                             Text {
-                                text: modelData.properties && modelData.properties["application.name"] ? modelData.properties["application.name"] : modelData.name
+                                id: appName
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: volDropdown.appNameColWidth
+                                text: volDropdown.appName(appRow.modelData)
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 13
-                                width: 84
                                 elide: Text.ElideRight
                             }
                             Item {
-                                width: parent.width - 84 - 8 - 34
+                                anchors.left: appName.right
+                                anchors.leftMargin: 8
+                                anchors.right: appPct.left
+                                anchors.rightMargin: 8
                                 height: 10
                                 anchors.verticalCenter: parent.verticalCenter
 
@@ -1032,6 +1117,9 @@ Scope {
                                 }
                             }
                             Text {
+                                id: appPct
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: Math.round(modelData.audio.volume * 100) + "%"
                                 color: root.textDim
                                 font.family: Theme.fontFamily
@@ -1061,7 +1149,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsBt
                     align: "right"
-                    popupWidth: 248
+                    minWidth: 248
 
                     MenuButton {
                         width: parent.width
@@ -1082,11 +1170,15 @@ Scope {
                         delegate: MenuButton {
                             required property var modelData
                             width: parent.width
+                            // Full device name + status column: the popup widens to fit.
+                            implicitWidth: btName.implicitWidth + 8 + statusLabel.width + 2 * contentInset
                             discrete: true
                             onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
                             Text {
+                                id: btName
                                 anchors.left: parent.left
                                 anchors.right: statusLabel.left
+                                anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.name || modelData.deviceName
                                 color: modelData.connected ? root.textBright : root.textDefault
@@ -1142,7 +1234,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsNet
                     align: "right"
-                    popupWidth: 380
+                    minWidth: 380
                     wantsKeyboard: root.wifiExpandedSsid !== "" && root.wifiExpandedNeedsPassword
 
                     Repeater {
@@ -1195,6 +1287,8 @@ Scope {
 
                             MenuButton {
                                 width: parent.width
+                                // Full SSID + status columns: the popup widens to fit.
+                                implicitWidth: ssidText.implicitWidth + 8 + securityLabel.width + signalLabel.width + 2 * contentInset
                                 discrete: true
                                 // The connected network's actions are always shown below it,
                                 // so its row is a plain label: no hover chrome, no click.
@@ -1206,8 +1300,10 @@ Scope {
                                     root.wifiShowPassword = false;
                                 }
                                 Text {
+                                    id: ssidText
                                     anchors.left: parent.left
                                     anchors.right: securityLabel.left
+                                    anchors.rightMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
                                     text: (modelData.active ? "● " : "") + modelData.ssid
                                     color: modelData.active ? root.accent : root.textDefault
@@ -1437,7 +1533,7 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsPow
                     align: "right"
-                    popupWidth: 216
+                    minWidth: 216
 
                     SectionLabel { text: "POWER" }
 

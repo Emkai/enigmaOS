@@ -1,0 +1,9 @@
+# libcamera runtime configuration (read by libcamera >= 0.8; 0.7.2 ignores it
+# and is covered by LIBCAMERA_SOFTISP_MODE in the wireplumber service drop-in).
+# software_isp.mode=cpu: GPU (EGL) debayering fails on the NVIDIA EGL stack,
+# see configs/wireplumber/.config/systemd/user/wireplumber.service.d/.
+---
+version: 1
+configuration:
+  software_isp:
+    mode: cpu

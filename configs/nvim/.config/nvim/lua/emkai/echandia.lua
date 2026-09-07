@@ -58,118 +58,96 @@ function M.ensure_var(varname, prompt, default, cb)
     end)
 end
 
-function M.set_target()
-    vim.ui.input(
-        { prompt = "Deploy host: ", default = vim.g.echandia_deploy_host or "" },
-        function(host)
-            if not host or host == "" then
-                return
-            end
-            vim.g.echandia_deploy_host = host
-            vim.ui.input(
-                { prompt = "Arch: ", default = vim.g.echandia_deploy_arch or "amd64" },
-                function(arch)
-                    if not arch or arch == "" then
-                        return
-                    end
-                    vim.g.echandia_deploy_arch = arch
-                end
-            )
-        end
-    )
-end
+-- Every remembered setting, in the order M.configure() walks them. `repos`
+-- gates which repos see a step; `var`/`prompt` may be functions of the repo
+-- (version and build mode are per-repo). Build mode is a vim.ui.select over
+-- BUILD_MODES, everything else a free-text vim.ui.input.
+local CONFIGS = {
+    { kind = "build_mode", repos = { "bms", "escu", "sil" } },
+    { var = "echandia_deploy_host", prompt = "Deploy host: ", default = "", repos = { "bms", "escu" } },
+    { var = "echandia_deploy_arch", prompt = "Arch: ", default = "amd64", repos = { "bms", "escu" } },
+    {
+        var = function(repo) return "echandia_" .. repo .. "_version" end,
+        prompt = function(repo) return "Deploy version (" .. repo .. "): " end,
+        default = "99.99.99.01",
+        repos = { "bms", "escu", "sil" },
+    },
+    {
+        var = "echandia_sil_bundle_arch",
+        prompt = "Bundle arch (amd64,arm64,win-amd64 | native | all): ",
+        default = "all",
+        repos = { "sil" },
+    },
+    {
+        var = "echandia_sil_bundle_local_arch",
+        prompt = "Local-bundle arch (amd64 | arm64 | native): ",
+        default = "native",
+        repos = { "sil" },
+    },
+    { var = "echandia_bms_scus", prompt = "SCU count: ", default = "1", repos = { "bms" } },
+    { var = "echandia_sil_scus", prompt = "SCU count: ", default = "1", repos = { "sil" } },
+    { var = "echandia_launch_docker", prompt = "Launch with docker: ", default = "false", repos = { "bms", "escu" } },
+    { var = "echandia_launch_metrics", prompt = "Launch metrics stack: ", default = "false", repos = { "bms" } },
+    { var = "echandia_launch_gen_config", prompt = "Generate config on launch: ", default = "false", repos = { "bms", "escu" } },
+    { var = "echandia_sil_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "sil" } },
+    { var = "echandia_sil_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "sil" } },
+}
 
-function M.set_version()
+-- Walk every config relevant to the current repo, one prompt after another.
+-- Enter keeps the shown value (current or default) and moves on; Esc on a
+-- text prompt aborts the rest of the walk, Esc on the build-mode select just
+-- skips it (cancel is the only way to keep the current mode in a select).
+function M.configure()
     local repo = M.detect_repo()
     if not repo then
         notify_err("Not in a bms, escu, or sil repo")
         return
     end
-    local varname = "echandia_" .. repo .. "_version"
-    vim.ui.input(
-        { prompt = "Deploy version (" .. repo .. "): ", default = vim.g[varname] or "99.99.99.01" },
-        function(v)
-            if not v or v == "" then
-                return
-            end
-            vim.g[varname] = v
+    local steps = vim.tbl_filter(function(cfg)
+        return vim.tbl_contains(cfg.repos, repo)
+    end, CONFIGS)
+    local i = 0
+    local function next_step()
+        i = i + 1
+        local cfg = steps[i]
+        if not cfg then
+            return
         end
-    )
-end
-
-function M.set_bundle_arch()
-    vim.ui.input(
-        {
-            prompt = "Bundle arch (amd64,arm64,win-amd64 | native | all): ",
-            default = vim.g.echandia_sil_bundle_arch or "all",
-        },
-        function(v)
-            if not v or v == "" then
-                return
-            end
-            vim.g.echandia_sil_bundle_arch = v
-            vim.ui.input(
-                {
-                    prompt = "Local-bundle arch (amd64 | arm64 | native): ",
-                    default = vim.g.echandia_sil_bundle_local_arch or "native",
-                },
-                function(lv)
-                    if not lv or lv == "" then
-                        return
+        if cfg.kind == "build_mode" then
+            local varname = "echandia_" .. repo .. "_build_mode"
+            local current = vim.g[varname]
+            vim.ui.select(BUILD_MODES[repo], {
+                prompt = "Build mode (" .. repo .. "):",
+                format_item = function(item)
+                    if item.key == current then
+                        return item.label .. "  [current]"
                     end
-                    vim.g.echandia_sil_bundle_local_arch = lv
+                    return item.label
+                end,
+            }, function(choice)
+                if choice then
+                    vim.g[varname] = choice.key
                 end
-            )
+                next_step()
+            end)
+            return
         end
-    )
-end
-
-function M.set_launch_docker()
-    vim.ui.input(
-        { prompt = "Launch with docker: ", default = vim.g.echandia_launch_docker or "false" },
-        function(v)
-            if not v or v == "" then
-                return
+        local varname = type(cfg.var) == "function" and cfg.var(repo) or cfg.var
+        local prompt = type(cfg.prompt) == "function" and cfg.prompt(repo) or cfg.prompt
+        vim.ui.input(
+            { prompt = prompt, default = vim.g[varname] or cfg.default },
+            function(v)
+                if v == nil then
+                    return
+                end
+                if v ~= "" then
+                    vim.g[varname] = v
+                end
+                next_step()
             end
-            vim.g.echandia_launch_docker = v
-        end
-    )
-end
-
-function M.set_launch_metrics()
-    vim.ui.input(
-        { prompt = "Launch metrics stack: ", default = vim.g.echandia_launch_metrics or "false" },
-        function(v)
-            if not v or v == "" then
-                return
-            end
-            vim.g.echandia_launch_metrics = v
-        end
-    )
-end
-
-function M.set_launch_hardware()
-    vim.ui.input(
-        { prompt = "Launch against hardware: ", default = vim.g.echandia_launch_hardware or "false" },
-        function(v)
-            if not v or v == "" then
-                return
-            end
-            vim.g.echandia_launch_hardware = v
-        end
-    )
-end
-
-function M.set_launch_gen_config()
-    vim.ui.input(
-        { prompt = "Generate config on launch: ", default = vim.g.echandia_launch_gen_config or "false" },
-        function(v)
-            if not v or v == "" then
-                return
-            end
-            vim.g.echandia_launch_gen_config = v
-        end
-    )
+        )
+    end
+    next_step()
 end
 
 function M.ensure_gen_config(cb)
@@ -188,30 +166,6 @@ function M.ensure_gen_config(cb)
             cb(v)
         end
     )
-end
-
-function M.set_build_mode()
-    local repo = M.detect_repo()
-    if not repo then
-        notify_err("Not in a bms, escu, or sil repo")
-        return
-    end
-    local modes = BUILD_MODES[repo]
-    if not modes then
-        vim.notify("No build mode choice for " .. repo, vim.log.levels.INFO)
-        return
-    end
-    local varname = "echandia_" .. repo .. "_build_mode"
-    vim.ui.select(modes, {
-        prompt = "Build mode (" .. repo .. "):",
-        format_item = function(item) return item.label end,
-    }, function(choice)
-        if not choice then
-            return
-        end
-        vim.g[varname] = choice.key
-        vim.notify(varname .. " = " .. choice.key)
-    end)
 end
 
 function M.ensure_build_mode(repo, cb)
@@ -640,7 +594,13 @@ end
 
 -- Bring up the SIL stack via the sil repo's own setup.sh (regenerates configs
 -- and starts the compose stack). The password is prompted each time and is not
--- persisted in a vim global; the SCU count is remembered like echandia_bms_scus.
+-- persisted in a vim global; the SCU count, EScu hardware type and battery
+-- module type are prompted once and remembered (change them later via the `es`
+-- config walk). Hardware type "none" (the default) or empty omits -w; any other
+-- value is passed as `-w <type>` (e.g. 10 = s05). Module type is always passed
+-- as `--module-type <v>` (23ah/20ah/26ah/155ah, or an enum name/value); the
+-- BMU type is deliberately not set here — setup.sh derives it from the module
+-- type (155ah -> Wise LMU V2, Toshiba -> BMU2G).
 function M.launch_sil()
     local sil_dir = M.detect_sil_dir()
     if not sil_dir then
@@ -648,20 +608,25 @@ function M.launch_sil()
         return
     end
     M.ensure_var("echandia_sil_scus", "SCU count: ", "1", function(scus)
-        vim.ui.input({ prompt = "SIL password: " }, function(pw)
-            if not pw or pw == "" then
-                return
-            end
-            local cmd = string.format(
-                "cd %s && ./setup.sh -s %s --password %s",
-                vim.fn.shellescape(sil_dir),
-                vim.fn.shellescape(tostring(scus)),
-                vim.fn.shellescape(pw)
-            )
-            if vim.g.echandia_launch_hardware == "true" then
-                cmd = cmd .. " -w"
-            end
-            M.run_in_float(cmd)
+        M.ensure_var("echandia_sil_escu_hw", "EScu hardware type (-w, e.g. 10 = s05 | none): ", "none", function(hw)
+            M.ensure_var("echandia_sil_module_type", "Module type (23ah | 20ah | 26ah | 155ah): ", "23ah", function(module_type)
+                vim.ui.input({ prompt = "SIL password: " }, function(pw)
+                    if not pw or pw == "" then
+                        return
+                    end
+                    local cmd = string.format(
+                        "cd %s && ./setup.sh -s %s --password %s --module-type %s",
+                        vim.fn.shellescape(sil_dir),
+                        vim.fn.shellescape(tostring(scus)),
+                        vim.fn.shellescape(pw),
+                        vim.fn.shellescape(module_type)
+                    )
+                    if hw ~= "none" and hw ~= "" then
+                        cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
+                    end
+                    M.run_in_float(cmd)
+                end)
+            end)
         end)
     end)
 end
@@ -718,22 +683,16 @@ end
 -- iterates this and binds only the entries whose `repos` include the detected
 -- repo, so commands never show where they don't apply. SIL has no remote deploy
 -- target, so `ed`/deploy is bms/escu only; the full-stack build (formerly
--- deploy_sil) is a `eb` build mode instead.
+-- deploy_sil) is a `eb` build mode instead. All remembered settings live
+-- behind one `es` walk (see CONFIGS) instead of a keymap per setting.
 M.keymaps = {
-    { lhs = "eb", fn = M.build,                 repos = { "bms", "escu", "sil" }, desc = "Echandia build" },
-    { lhs = "eB", fn = M.set_build_mode,        repos = { "bms", "escu", "sil" }, desc = "Echandia set build mode" },
-    { lhs = "ec", fn = M.clean,                 repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
-    { lhs = "ed", fn = M.deploy,                repos = { "bms", "escu" },        desc = "Echandia deploy" },
-    { lhs = "el", fn = M.launch,                repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
-    { lhs = "eg", fn = M.generate_embedded,     repos = { "bms", "escu" },        desc = "Echandia generate embedded" },
-    { lhs = "en", fn = M.generate_nswag,        repos = { "bms" },                desc = "Echandia generate nswag (bms)" },
-    { lhs = "et", fn = M.set_target,            repos = { "bms", "escu" },        desc = "Echandia set deploy target (host + arch)" },
-    { lhs = "ev", fn = M.set_version,           repos = { "bms", "escu", "sil" }, desc = "Echandia set deploy version" },
-    { lhs = "ea", fn = M.set_bundle_arch,       repos = { "sil" },                desc = "Echandia set bundle arch (sil)" },
-    { lhs = "ep", fn = M.set_launch_docker,     repos = { "bms", "escu" },        desc = "Echandia set use docker for launch" },
-    { lhs = "em", fn = M.set_launch_metrics,    repos = { "bms" },                desc = "Echandia set metrics stack on launch (bms)" },
-    { lhs = "ew", fn = M.set_launch_hardware,   repos = { "sil" },                desc = "Echandia set hardware mode on launch (sil)" },
-    { lhs = "eG", fn = M.set_launch_gen_config, repos = { "bms", "escu" },        desc = "Echandia set gen-config on launch" },
+    { lhs = "eb", fn = M.build,             repos = { "bms", "escu", "sil" }, desc = "Echandia build" },
+    { lhs = "ec", fn = M.clean,             repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
+    { lhs = "ed", fn = M.deploy,            repos = { "bms", "escu" },        desc = "Echandia deploy" },
+    { lhs = "el", fn = M.launch,            repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
+    { lhs = "eg", fn = M.generate_embedded, repos = { "bms", "escu" },        desc = "Echandia generate embedded" },
+    { lhs = "en", fn = M.generate_nswag,    repos = { "bms" },                desc = "Echandia generate nswag (bms)" },
+    { lhs = "es", fn = M.configure,         repos = { "bms", "escu", "sil" }, desc = "Echandia settings (walk all configs)" },
 }
 
 return M

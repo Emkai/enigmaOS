@@ -19,7 +19,8 @@ desktop install for you. See [`iso/README.md`](iso/README.md).
 
 - `configs/` — GNU Stow dotfiles (hypr, waybar, quickshell, dunst, kitty, nvim, tmux, bash).
 - `system/` — system-level config installed outside `$HOME` (SDDM theme
-  activation + patched theme QML), applied by the stages, not stow.
+  activation + patched theme QML, the IPU6/IVSC webcam load-order fix),
+  applied by the stages, not stow.
 - `scripts/` — the desktop-facing scripts these configs reference (quickshell menus,
   waybar status scripts, monitor switching, the stow helpers, an RDP/VPN
   connection manager, etc). Referenced by absolute path

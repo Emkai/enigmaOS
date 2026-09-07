@@ -1,0 +1,5 @@
+# Load the Intel IPU6 camera driver once the IVSC's MEI CSI client device has
+# appeared (its UUID is fixed in drivers/media/pci/intel/ivsc/mei_csi.c). Pairs
+# with /etc/modprobe.d/ipu6-after-ivsc.conf, which blocks the PCI-alias
+# autoload. Rationale in stages/15-camera-ivsc.sh.
+ACTION=="add", SUBSYSTEM=="mei", ENV{MEI_CL_UUID}=="92335fcf-3203-4472-af93-7b4453ac29da", RUN+="/usr/bin/modprobe intel_ipu6"
