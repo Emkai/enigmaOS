@@ -1,13 +1,20 @@
--- Auto-generate commit messages and lightly review commits via `claude`.
--- We run the git commands ourselves and feed their output straight to claude,
--- so it never needs tool permissions (reliable + fast in -p mode). MCP servers
--- are disabled so nothing heavy loads at startup.
+-- Auto-generate commit messages and lightly review commits via `claude`, or
+-- via a local llama.cpp server when the <leader>llt toggle (emkai.llama_toggle)
+-- is on — the same toggle that turns llama.vim completion on/off. We run the
+-- git commands ourselves and feed their output straight to the backend, so
+-- claude never needs tool permissions (reliable + fast in -p mode; MCP
+-- servers are disabled so nothing heavy loads at startup) and llama gets a
+-- plain /v1/chat/completions call.
 
-local MODEL = "sonnet"       -- good balance of speed and message quality
+local llama_toggle = require("emkai.llama_toggle")
+
+local MODEL = "sonnet"       -- good balance of speed and message quality (claude backend)
 local MAX_DIFF_BYTES = 60000 -- cap the payload so huge commits stay quick
 -- A real review call measured ~90s (claude -p startup + sonnet inference over a
 -- ~30KB prompt), so 120s left almost no headroom: a busier API or a bigger diff
 -- would cross it and get SIGTERM'd (seen as exit 143). Give ~2x the observed time.
+-- Local llama inference is normally much faster than this, but it shares the
+-- cap rather than adding a second knob to tune.
 local TIMEOUT_MS = 240000    -- per-attempt cap
 local MAX_ATTEMPTS = 3       -- retry transient failures (overload/rate-limit/network)
 local RETRY_BASE_MS = 2000   -- backoff grows: 2s, 4s, ...
@@ -15,6 +22,28 @@ local LOG_FILE = vim.fn.stdpath("cache") .. "/gitcommit-claude.log"
 
 local function claude_available()
     return vim.fn.executable("claude") == 1
+end
+
+-- The toggle only flips llama.vim's own completion on/off; the endpoint/model
+-- come straight from vim.g.llama_config (set once in lua/plugins/llama.lua)
+-- regardless of toggle state, so we just read it fresh on each call.
+local function use_llama()
+    return llama_toggle.is_enabled()
+end
+
+local function backend_name()
+    return use_llama() and "local llama" or "claude"
+end
+
+-- True when the currently-selected backend is actually usable: the claude CLI
+-- is on PATH, or (for llama) an endpoint is configured. Doesn't check that a
+-- configured llama server is actually reachable — that surfaces as a normal
+-- curl failure on first use.
+local function ai_available()
+    if use_llama() then
+        return (vim.g.llama_config or {}).endpoint_inst ~= nil
+    end
+    return claude_available()
 end
 
 -- Append one diagnostic line to the log so failures are always explainable
@@ -44,7 +73,73 @@ local function fail_detail(res, elapsed_s)
     return ("exit %s: %s"):format(res.code, vim.split(detail, "\n")[1])
 end
 
--- Run claude in print mode with MCP disabled, feeding `prompt` on stdin.
+-- Decode the single JSON object the prompts demand. The model occasionally
+-- wraps it in prose or code fences anyway — the point of asking for JSON is
+-- that such chatter lands OUTSIDE the braces, so we can cut it away instead
+-- of it leaking into the commit message. Try the whole (trimmed) output
+-- first, then the first balanced {...}, then greedily first-{ to last-}.
+local function decode_json_object(out)
+    out = vim.trim(out)
+    for _, cand in ipairs({ out, out:match("%b{}"), out:match("(%{.*%})") }) do
+        if cand then
+            local ok, obj = pcall(vim.json.decode, cand)
+            if ok and type(obj) == "table" then return obj end
+        end
+    end
+    return nil
+end
+
+-- Run one claude attempt in print mode with MCP disabled, feeding `prompt` on
+-- stdin. on_done gets vim.system's raw result (code/stdout/stderr/signal).
+local function run_claude_attempt(prompt, cwd, timeout_ms, on_done)
+    local cmd = {
+        "claude", "-p",
+        "--model", MODEL,
+        "--mcp-config", '{"mcpServers":{}}',
+        "--strict-mcp-config",
+    }
+    vim.system(cmd, { stdin = prompt, text = true, cwd = cwd, timeout = timeout_ms }, on_done)
+end
+
+-- Run one attempt against the local llama.cpp server's OpenAI-compatible
+-- chat-completions endpoint (same endpoint/model llama.vim uses for its
+-- instruct requests). Shapes the result to look like run_claude_attempt's
+-- (code/stdout/stderr) so the shared retry/parse logic in ask_ai doesn't need
+-- to know which backend produced it.
+local function run_llama_attempt(prompt, timeout_ms, on_done)
+    local cfg = vim.g.llama_config or {}
+    local endpoint = cfg.endpoint_inst
+    if not endpoint then
+        on_done({ code = 1, stderr = "llama endpoint not configured (vim.g.llama_config.endpoint_inst)" })
+        return
+    end
+    local body = vim.json.encode({
+        model = cfg.model_inst,
+        messages = { { role = "user", content = prompt } },
+        temperature = 0.2,
+        max_tokens = 512,
+    })
+    vim.system(
+        { "curl", "-sS", "--max-time", tostring(math.ceil(timeout_ms / 1000)),
+            "-H", "Content-Type: application/json", "--data-binary", "@-", endpoint },
+        { stdin = body, text = true, timeout = timeout_ms },
+        function(res)
+            if res.code == 0 and res.stdout and res.stdout ~= "" then
+                local obj = decode_json_object(res.stdout)
+                local content = obj and obj.choices and obj.choices[1]
+                    and obj.choices[1].message and obj.choices[1].message.content
+                if content then
+                    res.stdout = content
+                else
+                    res.code = 1
+                    res.stderr = "unexpected llama response: " .. res.stdout:sub(1, 300)
+                end
+            end
+            on_done(res)
+        end)
+end
+
+-- Ask the currently-selected backend (claude or local llama), feeding `prompt`.
 -- Retries transient failures (non-zero exit, empty output, or — when opts.parse
 -- is given — output that doesn't parse) with exponential backoff; on_result
 -- fires once (on success or after the last try). opts.parse(stdout) must return
@@ -53,50 +148,48 @@ end
 -- surface progress. opts.label tags the operation in the log. Every attempt's
 -- outcome (timing, exit/signal, stderr) is written to LOG_FILE and res.elapsed_s
 -- is set so callers can report it.
-local function ask_claude(prompt, cwd, on_result, opts, _attempt)
+local function ask_ai(prompt, cwd, on_result, opts, _attempt)
     opts = opts or {}
     local attempt = _attempt or 1
-    local label = opts.label or "claude"
-    local cmd = {
-        "claude", "-p",
-        "--model", MODEL,
-        "--mcp-config", '{"mcpServers":{}}',
-        "--strict-mcp-config",
-    }
+    local label = (opts.label or "ai") .. "/" .. backend_name():gsub(" ", "-")
     local uv = vim.uv or vim.loop
     local start = uv.hrtime()
-    vim.system(cmd, { stdin = prompt, text = true, cwd = cwd, timeout = TIMEOUT_MS },
-        function(res)
-            res.elapsed_s = math.floor((uv.hrtime() - start) / 1e9 + 0.5)
-            vim.schedule(function()
-                local ok = res.code == 0 and res.stdout and res.stdout ~= ""
-                if ok and opts.parse then
-                    res.parsed = opts.parse(res.stdout)
-                    if res.parsed == nil then
-                        ok = false
-                        res.parse_failed = true
-                    end
+    local function on_attempt_done(res)
+        res.elapsed_s = math.floor((uv.hrtime() - start) / 1e9 + 0.5)
+        vim.schedule(function()
+            local ok = res.code == 0 and res.stdout and res.stdout ~= ""
+            if ok and opts.parse then
+                res.parsed = opts.parse(res.stdout)
+                if res.parsed == nil then
+                    ok = false
+                    res.parse_failed = true
                 end
-                local stderr = vim.trim(res.stderr or "")
-                local extra = stderr ~= "" and ("\n  stderr: " .. stderr:sub(1, 800)) or ""
-                if res.parse_failed then
-                    extra = extra .. "\n  unparseable stdout: "
-                        .. vim.trim(res.stdout):sub(1, 800)
-                end
-                log_line(("%s attempt %d/%d: %s in %ds (exit=%s signal=%s)%s"):format(
-                    label, attempt, MAX_ATTEMPTS,
-                    ok and "OK" or "FAIL", res.elapsed_s, res.code, res.signal or 0,
-                    extra))
-                if ok or attempt >= MAX_ATTEMPTS then
-                    on_result(res)
-                else
-                    if opts.on_retry then opts.on_retry(res, attempt, attempt + 1) end
-                    vim.defer_fn(function()
-                        ask_claude(prompt, cwd, on_result, opts, attempt + 1)
-                    end, RETRY_BASE_MS * attempt)
-                end
-            end)
+            end
+            local stderr = vim.trim(res.stderr or "")
+            local extra = stderr ~= "" and ("\n  stderr: " .. stderr:sub(1, 800)) or ""
+            if res.parse_failed then
+                extra = extra .. "\n  unparseable stdout: "
+                    .. vim.trim(res.stdout or ""):sub(1, 800)
+            end
+            log_line(("%s attempt %d/%d: %s in %ds (exit=%s signal=%s)%s"):format(
+                label, attempt, MAX_ATTEMPTS,
+                ok and "OK" or "FAIL", res.elapsed_s, res.code, res.signal or 0,
+                extra))
+            if ok or attempt >= MAX_ATTEMPTS then
+                on_result(res)
+            else
+                if opts.on_retry then opts.on_retry(res, attempt, attempt + 1) end
+                vim.defer_fn(function()
+                    ask_ai(prompt, cwd, on_result, opts, attempt + 1)
+                end, RETRY_BASE_MS * attempt)
+            end
         end)
+    end
+    if use_llama() then
+        run_llama_attempt(prompt, TIMEOUT_MS, on_attempt_done)
+    else
+        run_claude_attempt(prompt, cwd, TIMEOUT_MS, on_attempt_done)
+    end
 end
 
 -- Synchronous git call; returns stdout string, or nil on failure.
@@ -130,22 +223,6 @@ local function truncate(text)
     return text:sub(1, MAX_DIFF_BYTES) .. "\n\n[diff truncated]\n"
 end
 
--- Decode the single JSON object the prompts demand. The model occasionally
--- wraps it in prose or code fences anyway — the point of asking for JSON is
--- that such chatter lands OUTSIDE the braces, so we can cut it away instead
--- of it leaking into the commit message. Try the whole (trimmed) output
--- first, then the first balanced {...}, then greedily first-{ to last-}.
-local function decode_json_object(out)
-    out = vim.trim(out)
-    for _, cand in ipairs({ out, out:match("%b{}"), out:match("(%{.*%})") }) do
-        if cand then
-            local ok, obj = pcall(vim.json.decode, cand)
-            if ok and type(obj) == "table" then return obj end
-        end
-    end
-    return nil
-end
-
 -- opts.parse for commit-message calls: {message = "..."} or nil.
 local function parse_commit(out)
     local obj = decode_json_object(out)
@@ -163,6 +240,22 @@ local function parse_review(out)
     local issue = type(obj.issue) == "string" and vim.trim(obj.issue) or ""
     if not obj.ok and issue == "" then return nil end
     return { ok = obj.ok, issue = issue }
+end
+
+-- Small local models routinely mix up which side of a diff a line is on;
+-- claude doesn't need this spelled out, so it's only injected for llama.
+local DIFF_LEGEND = [[
+DIFF FORMAT: this is a unified diff. A line starting with "-" was REMOVED
+(it existed before the change and is gone after). A line starting with "+"
+was ADDED (it did not exist before and is new after the change). A line with
+no leading +/- is unchanged context, shown only for orientation. Read the
+leading character of every line before describing it — never describe a
+removed ("-") line as added, or an added ("+") line as removed.
+
+]]
+
+local function diff_legend()
+    return use_llama() and DIFF_LEGEND or ""
 end
 
 local COMMIT_PROMPT = [[Write a git commit message for the staged diff below.
@@ -193,7 +286,7 @@ COMMIT:
 ]]
 
 local function review_commit(cwd)
-    if not claude_available() then return end
+    if not ai_available() then return end
     local show = git_output(cwd, { "show", "HEAD", "--stat", "--patch" })
     if not show or show == "" then return end
 
@@ -201,15 +294,15 @@ local function review_commit(cwd)
     -- done/failed) so it's always clear what state the review is in. `finish`
     -- writes the terminal state, then fades the popup after `linger` ms.
     local MiniNotify = require("mini.notify")
-    local id = MiniNotify.add("Reviewing latest commit via claude…", "INFO")
+    local id = MiniNotify.add("Reviewing latest commit via " .. backend_name() .. "…", "INFO")
     local function finish(msg, level, linger)
         MiniNotify.update(id, { msg = msg, level = level })
         vim.defer_fn(function() pcall(MiniNotify.remove, id) end, linger)
     end
 
-    ask_claude(REVIEW_PROMPT .. truncate(show), cwd, function(res)
+    ask_ai(REVIEW_PROMPT .. diff_legend() .. truncate(show), cwd, function(res)
         if not res.parsed then
-            finish("claude review failed (" .. fail_detail(res, res.elapsed_s)
+            finish("review failed (" .. fail_detail(res, res.elapsed_s)
                 .. ") — :ClaudeCommitLog for details", "WARN", 10000)
             return
         end
@@ -239,8 +332,10 @@ end
 local M = {}
 
 function M.review_latest()
-    if not claude_available() then
-        return vim.notify("claude CLI not found", vim.log.levels.ERROR)
+    if not ai_available() then
+        local msg = use_llama() and "llama endpoint not configured (vim.g.llama_config.endpoint_inst)"
+            or "claude CLI not found"
+        return vim.notify(msg, vim.log.levels.ERROR)
     end
     review_commit(repo_root(0))
 end
@@ -261,7 +356,7 @@ vim.api.nvim_create_autocmd("FileType", {
     pattern = "gitcommit",
     callback = function(ev)
         local buf = ev.buf
-        if not claude_available() then return end
+        if not ai_available() then return end
 
         local cwd = repo_root(buf)
         local pre_sha = vim.trim(git_output(cwd, { "rev-parse", "HEAD" }) or "")
@@ -270,15 +365,15 @@ vim.api.nvim_create_autocmd("FileType", {
         if diff and diff ~= "" and not vim.b[buf].claude_commit_generated
             and is_empty_message(buf) then
             vim.b[buf].claude_commit_generated = true
-            -- Persistent notification (like the review): stays up while claude
-            -- works, then updates in place to the result / retries.
+            -- Persistent notification (like the review): stays up while the
+            -- backend works, then updates in place to the result / retries.
             local MiniNotify = require("mini.notify")
-            local id = MiniNotify.add("Generating commit message via claude…", "INFO")
+            local id = MiniNotify.add("Generating commit message via " .. backend_name() .. "…", "INFO")
             local function finish(msg, level, linger)
                 MiniNotify.update(id, { msg = msg, level = level })
                 vim.defer_fn(function() pcall(MiniNotify.remove, id) end, linger)
             end
-            ask_claude(COMMIT_PROMPT .. truncate(diff), cwd, function(res)
+            ask_ai(COMMIT_PROMPT .. diff_legend() .. truncate(diff), cwd, function(res)
                 if not vim.api.nvim_buf_is_valid(buf) then
                     pcall(MiniNotify.remove, id)
                     return
