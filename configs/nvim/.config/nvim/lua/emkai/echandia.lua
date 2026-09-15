@@ -58,6 +58,26 @@ function M.ensure_var(varname, prompt, default, cb)
     end)
 end
 
+-- Prompt for (or recall) several settings in order, then hand the collected
+-- values to cb keyed by varname. Per step the semantics are ensure_var's: an
+-- already-set global skips its prompt, an empty or cancelled input aborts the
+-- rest of the chain.
+function M.ensure_vars(specs, cb)
+    local vals = {}
+    local function step(i)
+        local spec = specs[i]
+        if not spec then
+            cb(vals)
+            return
+        end
+        M.ensure_var(spec[1], spec[2], spec[3], function(v)
+            vals[spec[1]] = v
+            step(i + 1)
+        end)
+    end
+    step(1)
+end
+
 -- Every remembered setting, in the order M.configure() walks them. `repos`
 -- gates which repos see a step; `var`/`prompt` may be functions of the repo
 -- (version and build mode are per-repo). Build mode is a vim.ui.select over
@@ -91,6 +111,9 @@ local CONFIGS = {
     { var = "echandia_launch_gen_config", prompt = "Generate config on launch: ", default = "false", repos = { "bms", "escu" } },
     { var = "echandia_sil_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "sil" } },
     { var = "echandia_sil_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "sil" } },
+    { var = "echandia_sil_ch1", prompt = "CMUs on CAN channel 1 (0..28 | none): ", default = "none", repos = { "sil" } },
+    { var = "echandia_sil_ch2", prompt = "CMUs on CAN channel 2 (0..28 | none): ", default = "none", repos = { "sil" } },
+    { var = "echandia_sil_boxe", prompt = "Box mode subnet 10.10.10.0/24 (--boxe): ", default = "false", repos = { "sil" } },
 }
 
 -- Walk every config relevant to the current repo, one prompt after another.
@@ -594,39 +617,58 @@ end
 
 -- Bring up the SIL stack via the sil repo's own setup.sh (regenerates configs
 -- and starts the compose stack). The password is prompted each time and is not
--- persisted in a vim global; the SCU count, EScu hardware type and battery
--- module type are prompted once and remembered (change them later via the `es`
--- config walk). Hardware type "none" (the default) or empty omits -w; any other
--- value is passed as `-w <type>` (e.g. 10 = s05). Module type is always passed
--- as `--module-type <v>` (23ah/20ah/26ah/155ah, or an enum name/value); the
--- BMU type is deliberately not set here — setup.sh derives it from the module
--- type (155ah -> Wise LMU V2, Toshiba -> BMU2G).
+-- persisted in a vim global; everything else is prompted once and remembered
+-- (change them later via the `es` config walk). Hardware type "none" (the
+-- default) or empty omits -w; any other value is passed as `-w <type>` (e.g.
+-- 10 = s05). Module type is always passed as `--module-type <v>`
+-- (23ah/20ah/26ah/155ah, or an enum name/value); the BMU type is deliberately
+-- not set here — setup.sh derives it from the module type (155ah -> Wise LMU
+-- V2, Toshiba -> BMU2G). ch1/ch2 are the CMU counts per CAN channel (0..28),
+-- forwarded to the EBMS generator as `--ch1 N`/`--ch2 N`; "none" omits them and
+-- leaves the generator's own defaults. Box mode ("true") adds `--boxe`, moving
+-- the whole stack to 10.10.10.0/24 so it can't collide with a 10.20.x bench
+-- network; it's opt-in since the default addressing is the production-shaped one.
 function M.launch_sil()
     local sil_dir = M.detect_sil_dir()
     if not sil_dir then
         notify_err("Launch SIL: no sil dir found (need sil/simulators or simulators/)")
         return
     end
-    M.ensure_var("echandia_sil_scus", "SCU count: ", "1", function(scus)
-        M.ensure_var("echandia_sil_escu_hw", "EScu hardware type (-w, e.g. 10 = s05 | none): ", "none", function(hw)
-            M.ensure_var("echandia_sil_module_type", "Module type (23ah | 20ah | 26ah | 155ah): ", "23ah", function(module_type)
-                vim.ui.input({ prompt = "SIL password: " }, function(pw)
-                    if not pw or pw == "" then
-                        return
-                    end
-                    local cmd = string.format(
-                        "cd %s && ./setup.sh -s %s --password %s --module-type %s",
-                        vim.fn.shellescape(sil_dir),
-                        vim.fn.shellescape(tostring(scus)),
-                        vim.fn.shellescape(pw),
-                        vim.fn.shellescape(module_type)
-                    )
-                    if hw ~= "none" and hw ~= "" then
-                        cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
-                    end
-                    M.run_in_float(cmd)
-                end)
-            end)
+    M.ensure_vars({
+        { "echandia_sil_scus",        "SCU count: ",                                     "1" },
+        { "echandia_sil_escu_hw",     "EScu hardware type (-w, e.g. 10 = s05 | none): ", "none" },
+        { "echandia_sil_module_type", "Module type (23ah | 20ah | 26ah | 155ah): ",      "23ah" },
+        { "echandia_sil_ch1",         "CMUs on CAN channel 1 (0..28 | none): ",          "none" },
+        { "echandia_sil_ch2",         "CMUs on CAN channel 2 (0..28 | none): ",          "none" },
+        { "echandia_sil_boxe",        "Box mode subnet 10.10.10.0/24 (--boxe): ",        "false" },
+    }, function(vals)
+        vim.ui.input({ prompt = "SIL password: " }, function(pw)
+            if not pw or pw == "" then
+                return
+            end
+            local cmd = string.format(
+                "cd %s && ./setup.sh -s %s --password %s --module-type %s",
+                vim.fn.shellescape(sil_dir),
+                vim.fn.shellescape(tostring(vals.echandia_sil_scus)),
+                vim.fn.shellescape(pw),
+                vim.fn.shellescape(vals.echandia_sil_module_type)
+            )
+            local hw = vals.echandia_sil_escu_hw
+            if hw ~= "none" and hw ~= "" then
+                cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
+            end
+            local ch1 = vals.echandia_sil_ch1
+            if ch1 ~= "none" and ch1 ~= "" then
+                cmd = cmd .. " --ch1 " .. vim.fn.shellescape(ch1)
+            end
+            local ch2 = vals.echandia_sil_ch2
+            if ch2 ~= "none" and ch2 ~= "" then
+                cmd = cmd .. " --ch2 " .. vim.fn.shellescape(ch2)
+            end
+            if vals.echandia_sil_boxe == "true" then
+                cmd = cmd .. " --boxe"
+            end
+            M.run_in_float(cmd)
         end)
     end)
 end

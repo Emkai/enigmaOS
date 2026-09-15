@@ -73,12 +73,28 @@ chromium_args=(
     --user-data-dir="$profile_dir"
     --proxy-server="socks5://127.0.0.1:$port"
     --host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+    # Silence the "unsupported command-line flag" infobar that
+    # --host-resolver-rules trips; --test-type only affects test-only UI.
+    --test-type
     --no-first-run
+    # Keep the throwaway profile from dragging Google's startup extras through
+    # the tunnel: component updates (gvt1.com; needs both flags), optimization
+    # guide hints, and the network time check.
+    --disable-background-networking
+    --disable-component-update
+    --disable-features=OptimizationHints,OptimizationGuideModelDownloading,NetworkTimeServiceQuerying
 )
 # Send loopback through the proxy too, so 127.0.0.1/localhost reach the
 # remote's loopback instead of being bypassed to this machine.
 $loopback && chromium_args+=(--proxy-bypass-list="<-loopback>")
 
-chromium "${chromium_args[@]}"
+# Start on about:blank: the new tab page fetches from Google and logs an
+# "incorrect profile type" error on a fresh profile. Chromium's stderr is
+# environmental noise here (a GTK4-only property in the tokyonight GTK3 theme,
+# a fontconfig complaint, and a GCM check-in that fails with DEPRECATED_ENDPOINT
+# and that no flag disables), so drop those lines and keep anything else.
+# grep exits 1 when every stderr line was noise, which is the normal case.
+{ chromium "${chromium_args[@]}" about:blank 2>&1 1>&3 |
+    grep --line-buffered -vE 'Gtk-WARNING|Theme parsing error|Fontconfig error|registration_request\.cc|^$' >&2 || true; } 3>&1
 
 echo "Chromium closed. Cleaning up."
