@@ -36,6 +36,20 @@ match_description_using_regex = true
 description = "DELL P2723DE 466F714"
 match_description_using_regex = true
 
+# Uppfinnovation two-monitor desk: both AOC U27V4G6B present -> externals only,
+# laptop off. Matched by serial so it never collides with the other docks.
+[profiles.uppfinnovation-2-monitor]
+config_file = "hyprconfigs/uppfinnovation-2-monitor.lua"
+config_file_type = "static"
+
+[[profiles.uppfinnovation-2-monitor.conditions.required_monitors]]
+description = "U27V4G6B VDRNBHA000683"
+match_description_using_regex = true
+
+[[profiles.uppfinnovation-2-monitor.conditions.required_monitors]]
+description = "U27V4G6B VDRNBHA000660"
+match_description_using_regex = true
+
 # Single external Samsung LS27D60xU -> monitor on the left, laptop panel on
 # the right. Same physical setup at home (HK2Y700227) and at the Echandia lab
 # standing desk (HK2Y400056); matched by serial so it never collides with the
