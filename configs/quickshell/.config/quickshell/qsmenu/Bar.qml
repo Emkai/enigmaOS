@@ -36,6 +36,8 @@ Scope {
     readonly property color hairline: "#232b36"
     readonly property color accent: Theme.accentColor
     readonly property color hoverBg: Qt.rgba(accent.r, accent.g, accent.b, 0.10)
+    readonly property color dueLate: "#e2707a" // deadline already gone
+    readonly property color dueSoon: "#d9a55c" // deadline lands today
 
     readonly property string repoScripts: Quickshell.env("HOME") + "/src/enigmaOS/scripts"
 
@@ -324,7 +326,12 @@ Scope {
     component HoverState: Item {
         property bool open: false
         property bool hovering: false
-        Timer { id: closeTimer; interval: 150; onTriggered: if (!parent.hovering) parent.open = false }
+        // Held open regardless of the pointer — set by a dropdown the user is
+        // typing into, which would otherwise vanish the moment the pointer
+        // drifted off it (see the todo dropdown's composer).
+        property bool pinned: false
+        Timer { id: closeTimer; interval: 150; onTriggered: if (!parent.hovering && !parent.pinned) parent.open = false }
+        onPinnedChanged: if (!pinned && !hovering) closeTimer.restart()
         function enter() { hovering = true; open = true; }
         function leave() { hovering = false; closeTimer.restart(); }
     }
@@ -477,6 +484,550 @@ Scope {
         }
     }
 
+    // ---- Todo dropdown state ----
+    //
+    // Shared across screens, like the wifi expander above: only one todo
+    // dropdown is ever hovered at a time. Either flag pulls compositor keyboard
+    // focus to the open dropdown, and (with something actually typed) pins it
+    // open, so editing doesn't end the moment the pointer drifts off.
+    property bool todoComposing: false  // the new-task row wants the keyboard
+    property string todoExpandedId: ""  // task whose editor is open, at most one
+    readonly property int todoDueWidth: 96 // fixed deadline column: an ageing label ("fri" -> "2d late") must not resize the popup
+    readonly property int todoNoteWidth: 14
+    readonly property int todoIndent: 30 // left inset shared by every expanded editor
+
+    function todoDueColor(tone, done) {
+        if (done)
+            return root.textFaint;
+        if (tone === "overdue")
+            return root.dueLate;
+        if (tone === "today")
+            return root.dueSoon;
+        if (tone === "soon")
+            return root.textDefault;
+        if (tone === "later")
+            return root.textDim;
+        return root.textFaint;
+    }
+
+    function todoDismiss() {
+        root.todoComposing = false;
+        root.todoExpandedId = "";
+    }
+
+    // "-" / ":" between the picker's cells.
+    component DueSep: Text {
+        color: root.textDimmer
+        font.family: Theme.fontFamily
+        font.pixelSize: 12
+        height: 22
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    // ---- One numeric cell of the deadline picker ----
+    //
+    // Type into it, wheel over it, or use up/down. It reports edits rather than
+    // writing them back itself: DueFields owns the arithmetic, because a day or
+    // month only means something against the rest of the date.
+    component DueField: Rectangle {
+        id: cell
+        property int digits: 2
+        property int value: -1 // -1 = unset, shown as dashes
+        property Item nextFocus: null
+        readonly property alias focusItem: input
+        signal stepped(int delta)
+        signal typed(int v)
+
+        width: 8 + cell.digits * 9
+        height: 22
+        radius: 3
+        color: "transparent"
+        border.width: 1
+        border.color: input.activeFocus ? root.accent : (cellHover.hovered ? root.textDimmer : root.hairline)
+
+        // Pushed in whenever the owner recalculates, including right after an
+        // edit of our own — a plain binding on `text` would be dropped the
+        // moment the user typed, and the clamped result would never show.
+        function sync() {
+            input.text = cell.value < 0 ? "" : String(cell.value).padStart(cell.digits, "0");
+        }
+        onValueChanged: cell.sync()
+        Component.onCompleted: cell.sync()
+
+        HoverHandler { id: cellHover }
+
+        TextInput {
+            id: input
+            anchors.fill: parent
+            anchors.margins: 3
+            horizontalAlignment: TextInput.AlignHCenter
+            verticalAlignment: TextInput.AlignVCenter
+            color: root.textDefault
+            font.family: Theme.fontFamily
+            font.pixelSize: 12
+            maximumLength: cell.digits
+            validator: IntValidator { bottom: 0; top: 9999 }
+            clip: true
+            KeyNavigation.tab: cell.nextFocus
+            Keys.onUpPressed: cell.stepped(1)
+            Keys.onDownPressed: cell.stepped(-1)
+            onEditingFinished: cell.typed(input.text === "" ? -1 : Number(input.text))
+        }
+
+        Text {
+            anchors.centerIn: parent
+            text: "-".repeat(cell.digits)
+            color: root.textFaint
+            font.family: Theme.fontFamily
+            font.pixelSize: 12
+            visible: input.text === "" && !input.activeFocus
+        }
+
+        // Wheel only: NoButton lets presses fall through to the TextInput below.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            onWheel: wheel => cell.stepped(wheel.angleDelta.y > 0 ? 1 : -1)
+        }
+    }
+
+    // ---- Deadline picker: year, month, day, hour, minute ----
+    //
+    // Holds the parts rather than a string so a half-filled date is a legal
+    // intermediate state; `stamp` is "" until the date is complete, and carries
+    // the time only once an hour is set. Date parts do real calendar arithmetic
+    // (31 jan + 1 month is 28 feb, not 3 mar); time parts deliberately don't
+    // carry into the date, so nudging an hour can never move the day.
+    component DueFields: Row {
+        id: df
+        property int yr: -1
+        property int mo: -1
+        property int dy: -1
+        property int hh: -1 // -1 = whole day, no time
+        property int mi: 0
+        property Item tabTarget: null
+        readonly property alias firstFocus: cellYear.focusItem
+
+        readonly property bool hasDate: df.yr > 0 && df.mo > 0 && df.dy > 0
+        readonly property string stamp: !df.hasDate ? ""
+            : df.yr + "-" + root.pad2(df.mo) + "-" + root.pad2(df.dy)
+                + (df.hh < 0 ? "" : "T" + root.pad2(df.hh) + ":" + root.pad2(df.mi))
+
+        spacing: 3
+
+        function load(s) {
+            const d = TodoStore.dueDate(s);
+            if (!d) {
+                df.clear();
+                return;
+            }
+            df.yr = d.getFullYear();
+            df.mo = d.getMonth() + 1;
+            df.dy = d.getDate();
+            const timed = TodoStore.dueHasTime(s);
+            df.hh = timed ? d.getHours() : -1;
+            df.mi = timed ? d.getMinutes() : 0;
+        }
+
+        function clear() {
+            df.yr = -1;
+            df.mo = -1;
+            df.dy = -1;
+            df.hh = -1;
+            df.mi = 0;
+        }
+
+        function today() {
+            const n = new Date();
+            df.yr = n.getFullYear();
+            df.mo = n.getMonth() + 1;
+            df.dy = n.getDate();
+        }
+
+        function _daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+
+        function _setDate(d) {
+            df.yr = d.getFullYear();
+            df.mo = d.getMonth() + 1;
+            df.dy = d.getDate();
+        }
+
+        // Keeps the day legal after the month or year moves under it.
+        function _clampDay() {
+            df.dy = Math.min(df.dy, df._daysInMonth(df.yr, df.mo));
+        }
+
+        function step(part, delta) {
+            if (!df.hasDate)
+                df.today(); // nothing to step from yet; start from today
+            if (part === "h" || part === "mi") {
+                if (df.hh < 0) {
+                    df.hh = 0;
+                    df.mi = 0;
+                }
+                if (part === "h")
+                    df.hh = Math.max(0, Math.min(23, df.hh + delta));
+                else
+                    df.mi = (df.mi + delta * 5 + 60) % 60;
+                return;
+            }
+            if (part === "y") {
+                df.yr = Math.max(1, df.yr + delta);
+                df._clampDay();
+            } else if (part === "mo") {
+                const keep = df.dy;
+                const m = new Date(df.yr, df.mo - 1 + delta, 1);
+                df.yr = m.getFullYear();
+                df.mo = m.getMonth() + 1;
+                df.dy = Math.min(keep, df._daysInMonth(df.yr, df.mo));
+            } else {
+                df._setDate(new Date(df.yr, df.mo - 1, df.dy + delta));
+            }
+        }
+
+        function commit(part, v) {
+            if (v < 0) {
+                // Emptying any date cell drops the deadline; emptying a time cell
+                // just takes the clock off it.
+                if (part === "h" || part === "mi")
+                    df.hh = -1;
+                else
+                    df.clear();
+                return;
+            }
+            if (part === "h" || part === "mi") {
+                if (!df.hasDate)
+                    df.today();
+                if (df.hh < 0)
+                    df.hh = 0;
+                if (part === "h")
+                    df.hh = Math.min(23, v);
+                else
+                    df.mi = Math.min(59, v);
+                return;
+            }
+            if (part === "y")
+                df.yr = v;
+            else if (part === "mo")
+                df.mo = Math.max(1, Math.min(12, v));
+            else
+                df.dy = Math.max(1, v);
+            // A cell can be filled before its neighbours; assume this month/year
+            // so a lone day still produces a usable date.
+            const n = new Date();
+            if (df.yr < 0) df.yr = n.getFullYear();
+            if (df.mo < 0) df.mo = n.getMonth() + 1;
+            if (df.dy < 0) df.dy = n.getDate();
+            df._clampDay();
+        }
+
+        DueField {
+            id: cellYear
+            digits: 4
+            value: df.yr
+            nextFocus: cellMonth.focusItem
+            onStepped: function (d) { df.step("y", d); }
+            onTyped: function (v) { df.commit("y", v); }
+        }
+        DueSep { text: "-" }
+        DueField {
+            id: cellMonth
+            value: df.mo
+            nextFocus: cellDay.focusItem
+            onStepped: function (d) { df.step("mo", d); }
+            onTyped: function (v) { df.commit("mo", v); }
+        }
+        DueSep { text: "-" }
+        DueField {
+            id: cellDay
+            value: df.dy
+            nextFocus: cellHour.focusItem
+            onStepped: function (d) { df.step("d", d); }
+            onTyped: function (v) { df.commit("d", v); }
+        }
+        Item { width: 8; height: 1 }
+        DueField {
+            id: cellHour
+            value: df.hh
+            nextFocus: cellMinute.focusItem
+            onStepped: function (d) { df.step("h", d); }
+            onTyped: function (v) { df.commit("h", v); }
+        }
+        DueSep { text: ":" }
+        DueField {
+            id: cellMinute
+            value: df.hh < 0 ? -1 : df.mi
+            nextFocus: df.tabTarget
+            onStepped: function (d) { df.step("mi", d); }
+            onTyped: function (v) { df.commit("mi", v); }
+        }
+        Item { width: 4; height: 1 }
+        MenuButton {
+            width: 52
+            implicitHeight: 22
+            discrete: true
+            onClicked: df.hasDate ? df.clear() : df.today()
+            Text {
+                anchors.centerIn: parent
+                text: df.hasDate ? "clear" : "today"
+                color: root.textDimmer
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+        }
+    }
+
+    // ---- One task in the todo dropdown ----
+    //
+    // The line itself is checkbox / title / notes mark / deadline / delete.
+    // Hovering reveals the description underneath; clicking anywhere that isn't
+    // the checkbox or the delete mark opens the editor below the row, where both
+    // the deadline and the description are changed and committed together.
+    component TodoRow: Column {
+        id: trow
+        required property var modelData
+        readonly property bool expanded: root.todoExpandedId === trow.modelData.id
+        width: parent.width
+        spacing: 0
+
+        function apply() {
+            TodoStore.edit(trow.modelData.id, dueFields.stamp, descInput.text);
+            root.todoExpandedId = "";
+        }
+
+        // Every mutation re-sorts the list and so rebuilds these delegates; a row
+        // rebuilt mid-edit comes up already expanded and never sees the
+        // visibility change, hence the prime runs from both places.
+        function prime() {
+            dueFields.load(trow.modelData.due);
+            descInput.text = trow.modelData.desc;
+            descInput.cursorPosition = descInput.length;
+            descInput.forceActiveFocus();
+        }
+
+        Rectangle {
+            width: parent.width
+            height: 24
+            radius: 3
+            color: rowHover.hovered || trow.expanded ? root.hoverBg : "transparent"
+            // Widens the popup around the task text (see Dropdown.naturalWidth);
+            // the deadline is a fixed column so its changing label can't.
+            implicitWidth: 6 + box.implicitWidth + 8 + title.implicitWidth + 6 + root.todoNoteWidth
+                + 6 + root.todoDueWidth + 6 + 16 + 6
+
+            // HoverHandler, not MouseArea: the checkbox/delete MouseAreas stack on
+            // top and would take hover tracking away from a MouseArea here.
+            HoverHandler { id: rowHover }
+
+            // Declared first so it sits under the checkbox and delete targets,
+            // which keep their own clicks.
+            MouseArea {
+                anchors.fill: parent
+                onClicked: root.todoExpandedId = trow.expanded ? "" : trow.modelData.id
+            }
+
+            Text {
+                id: box
+                anchors.left: parent.left
+                anchors.leftMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: trow.modelData.done ? "\uf046" : "\uf096"
+                color: boxMa.containsMouse ? root.accent : (trow.modelData.done ? root.textFaint : root.textDim)
+                font.family: Theme.fontFamily
+                font.pixelSize: 14
+                MouseArea {
+                    id: boxMa
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    hoverEnabled: true
+                    onClicked: TodoStore.toggle(trow.modelData.id)
+                }
+            }
+
+            Text {
+                id: title
+                anchors.left: box.right
+                anchors.leftMargin: 8
+                anchors.right: note.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: trow.modelData.text
+                elide: Text.ElideRight
+                color: trow.modelData.done ? root.textFaint : root.textDefault
+                font.family: Theme.fontFamily
+                font.pixelSize: 13
+                font.strikeout: trow.modelData.done
+            }
+
+            // Marks a task that carries notes. Purely an indicator now — the row
+            // click is what opens them.
+            Text {
+                id: note
+                width: root.todoNoteWidth
+                anchors.right: dueText.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignHCenter
+                text: "\uf036"
+                visible: trow.modelData.desc !== ""
+                color: trow.modelData.done ? root.textFaint : root.textDim
+                font.family: Theme.fontFamily
+                font.pixelSize: 11
+            }
+
+            Text {
+                id: dueText
+                width: root.todoDueWidth
+                anchors.right: del.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                text: trow.modelData.due !== "" ? TodoStore.dueLabel(trow.modelData.due, TodoStore.now)
+                    : (rowHover.hovered ? "set due" : "\uf073")
+                color: trow.modelData.due !== "" ? root.todoDueColor(TodoStore.dueTone(trow.modelData.due, TodoStore.now), trow.modelData.done)
+                    : root.textFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+
+            Text {
+                id: del
+                width: 16
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignHCenter
+                text: "\uf00d"
+                color: delMa.containsMouse ? root.dueLate : root.textFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+                visible: rowHover.hovered || trow.expanded
+                MouseArea {
+                    id: delMa
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    hoverEnabled: true
+                    onClicked: {
+                        if (trow.expanded)
+                            root.todoExpandedId = "";
+                        TodoStore.remove(trow.modelData.id);
+                    }
+                }
+            }
+        }
+
+        // Hover preview of the notes. Only grows downwards, so the row line the
+        // pointer is on never moves out from under it.
+        Row {
+            width: parent.width
+            visible: !trow.expanded && rowHover.hovered && trow.modelData.desc !== ""
+            leftPadding: root.todoIndent
+            rightPadding: 8
+            bottomPadding: 4
+
+            Text {
+                width: parent.width - parent.leftPadding - parent.rightPadding
+                text: trow.modelData.desc
+                wrapMode: Text.Wrap
+                color: root.textDimmer
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+        }
+
+        Column {
+            id: editPanel
+            width: parent.width
+            visible: trow.expanded
+            spacing: 6
+            leftPadding: root.todoIndent
+            rightPadding: 8
+            topPadding: 4
+            bottomPadding: 6
+            onVisibleChanged: if (visible) trow.prime()
+            Component.onCompleted: if (visible) trow.prime()
+
+            DueFields {
+                id: dueFields
+                tabTarget: descInput
+            }
+
+            Rectangle {
+                width: editPanel.width - editPanel.leftPadding - editPanel.rightPadding
+                // Grows with the text, but always offers a couple of lines to
+                // start writing in.
+                height: Math.max(52, descInput.implicitHeight + 16)
+                radius: 3
+                color: "transparent"
+                border.width: 1
+                border.color: descInput.activeFocus ? root.accent : root.hairline
+
+                TextEdit {
+                    id: descInput
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    color: root.textDefault
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 12
+                    // BeforeItem, or TextEdit swallows tab as a character.
+                    KeyNavigation.priority: KeyNavigation.BeforeItem
+                    KeyNavigation.tab: dueFields.firstFocus
+                    Keys.onEscapePressed: root.todoExpandedId = ""
+                    // Enter belongs to the text here, so ctrl+enter is what saves.
+                    Keys.onReturnPressed: event => {
+                        if (event.modifiers & Qt.ControlModifier)
+                            trow.apply();
+                        else
+                            event.accepted = false;
+                    }
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.top: parent.top
+                    anchors.topMargin: 8
+                    text: "description (optional)"
+                    color: root.textFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 12
+                    visible: descInput.text === ""
+                }
+            }
+
+            Row {
+                spacing: 6
+
+                MenuButton {
+                    width: 48
+                    implicitHeight: 22
+                    onClicked: trow.apply()
+                    Text { anchors.centerIn: parent; text: "save"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                }
+
+                MenuButton {
+                    width: 56
+                    implicitHeight: 22
+                    discrete: true
+                    onClicked: root.todoExpandedId = ""
+                    Text { anchors.centerIn: parent; text: "cancel"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                }
+
+                Text {
+                    height: 22
+                    verticalAlignment: Text.AlignVCenter
+                    leftPadding: 6
+                    text: "ctrl+enter"
+                    color: root.textFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 11
+                }
+            }
+        }
+    }
+
 
     Variants {
         model: Quickshell.screens
@@ -495,6 +1046,16 @@ Scope {
             WlrLayershell.namespace: "qsbar"
             color: "transparent"
 
+            HoverState {
+                id: hsTodo
+                // Pinned only while there is something to lose: a deadline being
+                // edited or a half-typed task. An empty composer closes on
+                // pointer-out like every other dropdown, so it can't strand
+                // itself open after the user wanders off.
+                pinned: root.todoExpandedId !== ""
+                    || (root.todoComposing && (newTaskInput.text !== "" || newDescInput.text !== ""
+                        || newDue.hasDate))
+            }
             HoverState { id: hsClock }
             HoverState { id: hsCpu }
             HoverState { id: hsRam }
@@ -533,6 +1094,52 @@ Scope {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 0
+
+                    // Todo
+                    Rectangle {
+                        width: todoRow.implicitWidth + 18
+                        height: root.barHeight
+                        color: hsTodo.open ? root.hoverBg : "transparent"
+
+                        Row {
+                            id: todoRow
+                            anchors.centerIn: parent
+                            spacing: 5
+
+                            Text {
+                                text: "\uf0ae"
+                                color: TodoStore.overdueCount > 0 ? root.dueLate
+                                    : (TodoStore.openCount > 0 ? root.accent : root.textDimmer)
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 14
+                            }
+                            Text {
+                                text: TodoStore.openCount
+                                visible: TodoStore.openCount > 0
+                                color: TodoStore.overdueCount > 0 ? root.dueLate : root.textDefault
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: hsTodo.enter()
+                            onExited: hsTodo.leave()
+                            // Hover just shows the list; clicking holds it open and
+                            // drops the cursor in the composer, clicking again lets go.
+                            onClicked: {
+                                if (root.todoComposing || root.todoExpandedId !== "") {
+                                    todoDropdown.dismiss();
+                                } else {
+                                    hsTodo.enter();
+                                    root.todoComposing = true;
+                                    todoDropdown.focusComposer();
+                                }
+                            }
+                        }
+                    }
 
                     Text {
                         text: root.isoWeek(root.now)
@@ -626,6 +1233,246 @@ Scope {
                                     font.pixelSize: 12
                                 }
                             }
+                        }
+                    }
+                }
+
+                Dropdown {
+                    id: todoDropdown
+                    barScreen: barWin.screen
+                    hover: hsTodo
+                    align: "left"
+                    minWidth: 380
+                    // Gated on being open: todoComposing is shared by every screen's
+                    // dropdown, and an off-screen window must never hold the
+                    // compositor's keyboard grab.
+                    wantsKeyboard: hsTodo.open && (root.todoComposing || root.todoExpandedId !== "")
+
+                    onVisibleChanged: {
+                        if (visible)
+                            return;
+                        root.todoDismiss();
+                        newTaskInput.focus = false;
+                        newDescInput.focus = false;
+                    }
+
+                    // The composer can only take focus once the popup is mapped,
+                    // so a click on the bar icon hands off through a tick.
+                    function focusComposer() { composerFocusTimer.restart(); }
+
+                    function dismiss() {
+                        root.todoDismiss();
+                        newTaskInput.focus = false;
+                        newDescInput.focus = false;
+                        hsTodo.open = false;
+                    }
+
+                    Timer { id: composerFocusTimer; interval: 40; onTriggered: newTaskInput.forceActiveFocus() }
+
+                    Item {
+                        width: parent.width
+                        height: 16
+
+                        SectionLabel {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "TODO"
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: {
+                                if (TodoStore.openCount === 0)
+                                    return TodoStore.tasks.length === 0 ? "" : "all done";
+                                let s = TodoStore.openCount + " open";
+                                if (TodoStore.overdueCount > 0)
+                                    s += " · " + TodoStore.overdueCount + " late";
+                                else if (TodoStore.dueTodayCount > 0)
+                                    s += " · " + TodoStore.dueTodayCount + " today";
+                                return s;
+                            }
+                            color: TodoStore.overdueCount > 0 ? root.dueLate : root.textDimmer
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Text {
+                        visible: TodoStore.tasks.length === 0
+                        text: "nothing on the list"
+                        color: root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                        topPadding: 4
+                        bottomPadding: 2
+                    }
+
+                    Repeater {
+                        model: TodoStore.openTasks
+                        delegate: TodoRow {}
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: 18
+                        visible: TodoStore.doneTasks.length > 0
+
+                        SectionLabel {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            text: "DONE"
+                        }
+                        MenuButton {
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            width: 56
+                            implicitHeight: 18
+                            discrete: true
+                            onClicked: TodoStore.clearDone()
+                            Text { anchors.centerIn: parent; text: "clear"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 11 }
+                        }
+                    }
+
+                    Repeater {
+                        model: TodoStore.doneTasks
+                        delegate: TodoRow {}
+                    }
+
+                    Item { width: parent.width; height: 4 }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: root.hairline
+                    }
+
+                    Row {
+                        id: composer
+                        width: parent.width
+                        spacing: 6
+                        topPadding: 4
+
+                        Rectangle {
+                            width: composer.width - addBtn.width - composer.spacing
+                            height: 24
+                            radius: 3
+                            color: "transparent"
+                            border.width: 1
+                            border.color: newTaskInput.activeFocus ? root.accent : root.hairline
+
+                            TextInput {
+                                id: newTaskInput
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.textDefault
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                                clip: true
+                                // Scene focus alone isn't enough: wantsKeyboard follows
+                                // todoComposing, and that is what actually gets the
+                                // compositor to route keys here.
+                                onActiveFocusChanged: if (activeFocus) root.todoComposing = true
+                                KeyNavigation.tab: newDescInput
+                                Keys.onReturnPressed: addBtn.clicked()
+                                Keys.onEscapePressed: todoDropdown.dismiss()
+                            }
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "new task"
+                                color: root.textFaint
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                                visible: newTaskInput.text === ""
+                            }
+                        }
+
+                        MenuButton {
+                            id: addBtn
+                            width: 44
+                            implicitHeight: 24
+                            onClicked: {
+                                if (newTaskInput.text.trim() === "") {
+                                    newTaskInput.forceActiveFocus();
+                                    return;
+                                }
+                                TodoStore.add(newTaskInput.text, newDue.stamp, newDescInput.text);
+                                newTaskInput.text = "";
+                                newDescInput.text = "";
+                                newDue.clear();
+                                newTaskInput.forceActiveFocus();
+                            }
+                            Text { anchors.centerIn: parent; text: "add"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                        }
+                    }
+
+                    // Deadline and notes for the new task, both optional. Only in
+                    // the way once the composer has the keyboard.
+                    Row {
+                        width: parent.width
+                        visible: root.todoComposing
+                        spacing: 8
+                        topPadding: 2
+
+                        Text {
+                            height: 22
+                            verticalAlignment: Text.AlignVCenter
+                            text: "due"
+                            color: root.textDimmer
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                        }
+
+                        DueFields {
+                            id: newDue
+                            tabTarget: newTaskInput
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        visible: root.todoComposing
+                        height: Math.max(40, newDescInput.implicitHeight + 16)
+                        radius: 3
+                        color: "transparent"
+                        border.width: 1
+                        border.color: newDescInput.activeFocus ? root.accent : root.hairline
+
+                        TextEdit {
+                            id: newDescInput
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            wrapMode: TextEdit.Wrap
+                            selectByMouse: true
+                            color: root.textDefault
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                            onActiveFocusChanged: if (activeFocus) root.todoComposing = true
+                            // BeforeItem, or TextEdit swallows tab as a character.
+                            KeyNavigation.priority: KeyNavigation.BeforeItem
+                            KeyNavigation.tab: newDue.firstFocus
+                            Keys.onEscapePressed: todoDropdown.dismiss()
+                            // Enter belongs to the text here, so ctrl+enter adds.
+                            Keys.onReturnPressed: event => {
+                                if (event.modifiers & Qt.ControlModifier)
+                                    addBtn.clicked();
+                                else
+                                    event.accepted = false;
+                            }
+                        }
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.top: parent.top
+                            anchors.topMargin: 8
+                            text: "description (optional)"
+                            color: root.textFaint
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
+                            visible: newDescInput.text === ""
                         }
                     }
                 }
