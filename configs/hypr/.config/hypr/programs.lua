@@ -3,7 +3,7 @@ local M = {
     terminal    = "kitty",
     fileManager = "dolphin",
     menu        = "~/src/enigmaOS/scripts/qs-drun",
-    browser     = "chromium",
+    browser     = "/usr/bin/chromium --profile-directory=Default",
     music       = "spotify",
 }
 
