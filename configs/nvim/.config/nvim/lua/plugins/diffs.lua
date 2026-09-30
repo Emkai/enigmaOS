@@ -2,7 +2,7 @@
 -- (:Git diff, inline = diffs in :G status). Side-by-side :Gdiffsplit
 -- already gets normal per-buffer highlighting without this.
 return {
-    'barrettruth/diffs.nvim',
+    url = 'https://forge.barrettruth.com/barrettruth/diffs.nvim',
     init = function()
         vim.g.diffs = {
             integrations = {

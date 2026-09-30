@@ -111,6 +111,7 @@ local CONFIGS = {
     { var = "echandia_launch_gen_config", prompt = "Generate config on launch: ", default = "false", repos = { "bms", "escu" } },
     { var = "echandia_sil_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "sil" } },
     { var = "echandia_sil_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "sil" } },
+    { var = "echandia_sil_module_sim", prompt = "Module simulator (lumped | cell): ", default = "lumped", repos = { "sil" } },
     { var = "echandia_sil_ch1", prompt = "CMUs on CAN channel 1 (0..28 | none): ", default = "none", repos = { "sil" } },
     { var = "echandia_sil_ch2", prompt = "CMUs on CAN channel 2 (0..28 | none): ", default = "none", repos = { "sil" } },
     { var = "echandia_sil_boxe", prompt = "Box mode subnet 10.10.10.0/24 (--boxe): ", default = "false", repos = { "sil" } },
@@ -629,7 +630,9 @@ end
 -- not set here — setup.sh derives it from the module type (155ah -> Wise LMU
 -- V2, Toshiba -> BMU2G). ch1/ch2 are the CMU counts per CAN channel (0..28),
 -- forwarded to the EBMS generator as `--ch1 N`/`--ch2 N`; "none" omits them and
--- leaves the generator's own defaults. Box mode ("true") adds `--boxe`, moving
+-- leaves the generator's own defaults. Module simulator "cell" adds
+-- `--module-sim cell`; "lumped" is setup.sh's default and is omitted, so
+-- checkouts without the flag keep working. Box mode ("true") adds `--boxe`, moving
 -- the whole stack to 10.10.10.0/24 so it can't collide with a 10.20.x bench
 -- network; it's opt-in since the default addressing is the production-shaped one.
 function M.launch_sil()
@@ -642,6 +645,7 @@ function M.launch_sil()
         { "echandia_sil_scus",        "SCU count: ",                                     "1" },
         { "echandia_sil_escu_hw",     "EScu hardware type (-w, e.g. 10 = s05 | none): ", "none" },
         { "echandia_sil_module_type", "Module type (23ah | 20ah | 26ah | 155ah): ",      "23ah" },
+        { "echandia_sil_module_sim",  "Module simulator (lumped | cell): ",              "lumped" },
         { "echandia_sil_ch1",         "CMUs on CAN channel 1 (0..28 | none): ",          "none" },
         { "echandia_sil_ch2",         "CMUs on CAN channel 2 (0..28 | none): ",          "none" },
         { "echandia_sil_boxe",        "Box mode subnet 10.10.10.0/24 (--boxe): ",        "false" },
@@ -657,6 +661,10 @@ function M.launch_sil()
         local hw = vals.echandia_sil_escu_hw
         if hw ~= "none" and hw ~= "" then
             cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
+        end
+        local sim = vals.echandia_sil_module_sim
+        if sim ~= "lumped" and sim ~= "" then
+            cmd = cmd .. " --module-sim " .. vim.fn.shellescape(sim)
         end
         local ch1 = vals.echandia_sil_ch1
         if ch1 ~= "none" and ch1 ~= "" then
