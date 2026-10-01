@@ -372,6 +372,9 @@ function M.build()
             local sil_dir = M.detect_sil_dir()
             local workspace = M.detect_workspace_root()
             local function run(version)
+                local bump = version and function()
+                    M.bump_version("echandia_sil_version")
+                end
                 -- Release bundle: sil-<version>-<arch>.tar.gz via the sil repo's
                 -- own scripts/build-bundles.sh (bundle_sil.sh wrapper); output
                 -- lands in <workspace>/sil/build/. The password is prompted each
@@ -405,7 +408,7 @@ function M.build()
                             if mode == "bundle_local" then
                                 cmd = cmd .. " -l"
                             end
-                            M.run_in_float(cmd)
+                            M.run_in_float(cmd, bump)
                         end)
                     end
                     if mode == "bundle_local" then
@@ -439,7 +442,7 @@ function M.build()
                         SCRIPTS_DIR,
                         vim.fn.shellescape(workspace),
                         vim.fn.shellescape(version)
-                    ))
+                    ), bump)
                     return
                 end
                 local parts = {}
@@ -466,7 +469,7 @@ function M.build()
                         vim.fn.shellescape(workspace)
                     ))
                 end
-                M.run_in_float(table.concat(parts, " && "))
+                M.run_in_float(table.concat(parts, " && "), bump)
             end
             if mode == "tools" then
                 run(nil) -- build_sil_tools takes no version
@@ -618,8 +621,11 @@ function M.generate_nswag()
 end
 
 -- Bring up the SIL stack via the sil repo's own setup.sh (regenerates configs
--- and starts the compose stack). Every setting, the password included, is
--- prompted once and remembered (change them later via the `es` config walk).
+-- and starts the compose stack). teardown.sh runs first so running containers
+-- never survive a launch with stale configs; its failure is ignored since it
+-- can't succeed before setup.sh has generated the compose files. Every
+-- setting, the password included, is prompted once and remembered (change
+-- them later via the `es` config walk).
 -- The password lives in a plain vim global for the nvim session only: vim.g is
 -- not written to shada, so it never reaches disk, but it is readable from any
 -- Lua in this instance and shown in the clear when `es` re-prompts it.
@@ -652,7 +658,7 @@ function M.launch_sil()
         { "echandia_sil_password",    "SIL password: ",                                  "" },
     }, function(vals)
         local cmd = string.format(
-            "cd %s && ./setup.sh -s %s --password %s --module-type %s",
+            "cd %s && { ./teardown.sh || true; } && ./setup.sh -s %s --password %s --module-type %s",
             vim.fn.shellescape(sil_dir),
             vim.fn.shellescape(tostring(vals.echandia_sil_scus)),
             vim.fn.shellescape(vals.echandia_sil_password),
