@@ -7,7 +7,17 @@ vim.opt.formatoptions:remove("o")
 require('mini.diff').setup()
 -- Floating, auto-fading notifications; also lets us update a message in place
 -- (e.g. the async commit review transitions "Reviewing…" → result on one popup).
-require('mini.notify').setup()
+require('mini.notify').setup({
+    content = {
+        format = function(notif)
+            local d = notif.data
+            if d and d.source == 'lsp_progress' and d.response.value.percentage == nil then
+                notif = vim.tbl_extend('force', notif, { msg = notif.msg:gsub(' ?%(%d+%%%)$', '') })
+            end
+            return MiniNotify.default_format(notif)
+        end,
+    },
+})
 vim.diagnostic.config({ virtual_text = true })
 
 require('oil').setup({

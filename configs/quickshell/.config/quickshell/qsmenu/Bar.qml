@@ -1029,6 +1029,74 @@ Scope {
     }
 
 
+    property var powerConfirm: null
+
+    function powerConfirmAccept() {
+        const cmd = root.powerConfirm.cmd;
+        root.powerConfirm = null;
+        Quickshell.execDetached(cmd);
+    }
+
+    PanelWindow {
+        visible: root.powerConfirm !== null
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "qsbar-confirm"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+        color: "transparent"
+        implicitWidth: 380
+        implicitHeight: 150
+
+        onVisibleChanged: if (visible) confirmBox.forceActiveFocus()
+
+        Rectangle {
+            id: confirmBox
+            anchors.fill: parent
+            color: root.bg
+            border.width: 1
+            border.color: root.accent
+            focus: true
+            Keys.onReturnPressed: root.powerConfirmAccept()
+            Keys.onEnterPressed: root.powerConfirmAccept()
+            Keys.onEscapePressed: root.powerConfirm = null
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 32
+                text: root.powerConfirm ? root.powerConfirm.name + "?" : ""
+                color: root.textBright
+                font.family: Theme.fontFamily
+                font.pixelSize: 20
+            }
+
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 24
+                spacing: 16
+                MenuButton {
+                    width: 140
+                    implicitHeight: 32
+                    onClicked: root.powerConfirm = null
+                    Text {
+                        anchors.centerIn: parent
+                        text: "cancel  esc"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 14
+                    }
+                }
+                MenuButton {
+                    width: 140
+                    implicitHeight: 32
+                    border.color: root.accent
+                    onClicked: root.powerConfirmAccept()
+                    Text {
+                        anchors.centerIn: parent
+                        text: "ok  enter"; color: root.accent; font.family: Theme.fontFamily; font.pixelSize: 14
+                    }
+                }
+            }
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 
@@ -2387,15 +2455,20 @@ Scope {
                     Repeater {
                         model: [
                             { name: "lock", key: "l", cmd: ["hyprlock"] },
-                            { name: "suspend", key: "s", cmd: ["systemctl", "suspend"] },
-                            { name: "log out", key: "e", cmd: ["hyprctl", "dispatch", "exit"] },
-                            { name: "reboot", key: "r", cmd: ["systemctl", "reboot"] },
-                            { name: "power off", key: "p", cmd: ["systemctl", "poweroff"] }
+                            { name: "suspend", key: "s", cmd: ["systemctl", "suspend"], confirm: true },
+                            { name: "log out", key: "e", cmd: ["hyprctl", "dispatch", "exit"], confirm: true },
+                            { name: "reboot", key: "r", cmd: ["systemctl", "reboot"], confirm: true },
+                            { name: "power off", key: "p", cmd: ["systemctl", "poweroff"], confirm: true }
                         ]
                         delegate: MenuButton {
                             required property var modelData
                             width: parent.width
-                            onClicked: Quickshell.execDetached(modelData.cmd)
+                            onClicked: {
+                                if (!modelData.confirm)
+                                    return Quickshell.execDetached(modelData.cmd);
+                                hsPow.open = false;
+                                root.powerConfirm = modelData;
+                            }
                             Text {
                                 anchors.left: parent.left
                                 anchors.verticalCenter: parent.verticalCenter
