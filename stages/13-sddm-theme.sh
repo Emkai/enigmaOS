@@ -38,3 +38,8 @@ sudo install -m644 "$ENIGMA_ROOT/system/sddm/sddm.conf" /etc/sddm.conf.d/sddm.co
 log "Patching sddm silent theme: caps lock indicator on the login screen"
 sudo install -m644 "$overrides_dir/Main.qml" "$theme_dir/Main.qml"
 sudo install -m644 "$overrides_dir"/components/*.qml -t "$theme_dir/components/"
+
+log "Selecting silent theme config enigma.conf (CaskaydiaMono instead of Red Hat)"
+sudo install -m644 "$overrides_dir"/configs/*.conf -t "$theme_dir/configs/"
+sudo sed -i -E '/^#? ?ConfigFile=configs\/enigma\.conf$/d; s|^ConfigFile=|# ConfigFile=|' "$theme_dir/metadata.desktop"
+echo 'ConfigFile=configs/enigma.conf' | sudo tee -a "$theme_dir/metadata.desktop" >/dev/null

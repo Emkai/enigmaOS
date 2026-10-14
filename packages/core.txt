@@ -39,6 +39,7 @@ qt6-virtualkeyboard
 polkit-kde-agent
 ttf-cascadia-mono-nerd
 ttf-roboto
+noto-fonts-emoji
 
 # Audio
 pipewire
