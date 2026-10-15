@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+dir="$HOME/.local/share/applications"
+
+entry_name() {
+    awk '/^\[/ { s = $0 } s == "[Desktop Entry]" && /^Name=/ { sub(/^Name=/, ""); print; exit }' "$1"
+}
+
+set_entry_name() {
+    local file="$1" tmp
+    tmp=$(mktemp "$dir/.pwa-fix-names.XXXXXX")
+    NAME="$2" awk '/^\[/ { s = $0 } s == "[Desktop Entry]" && /^Name=/ && !done { print "Name=" ENVIRON["NAME"]; done = 1; next } { print }' "$file" > "$tmp"
+    chmod --reference="$file" "$tmp"
+    mv "$tmp" "$file"
+}
+
+shopt -s nullglob
+for file in "$dir"/chrome-*-*.desktop; do
+    profile=$(basename "$file" .desktop)
+    profile=${profile##*-}
+    name=$(entry_name "$file")
+    [[ -n "$name" ]] || continue
+    base=${name% (PWA)}
+    base=${base% ("$profile")}
+    want="$base ($profile)"
+    [[ "$name" == "$want" ]] && continue
+    set_entry_name "$file" "$want"
+    echo "$(basename "$file"): $name -> $want"
+done

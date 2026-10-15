@@ -5,3 +5,4 @@
 hyprdynamicmonitors-prepare.service   # monitor-profile switching (hyprdynamicmonitors-bin, AUR)
 wireplumber.service
 xdg-user-dirs.service
+pwa-fix-names.path                    # keeps per-profile Chromium PWA names (scripts/pwa-fix-names)

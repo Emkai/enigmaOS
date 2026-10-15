@@ -1,0 +1,6 @@
+[Unit]
+Description=Re-apply per-profile names to Chromium PWA launchers
+
+[Service]
+Type=oneshot
+ExecStart=%h/src/enigmaOS/scripts/pwa-fix-names
