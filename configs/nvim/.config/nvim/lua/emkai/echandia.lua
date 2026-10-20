@@ -104,19 +104,26 @@ local CONFIGS = {
         default = "native",
         repos = { "sil" },
     },
-    { var = "echandia_bms_scus", prompt = "SCU count: ", default = "1", repos = { "bms" } },
-    { var = "echandia_sil_scus", prompt = "SCU count: ", default = "1", repos = { "sil" } },
+    { var = "echandia_scus", prompt = "SCU count: ", default = "1", repos = { "bms", "escu", "sil" } },
     { var = "echandia_launch_docker", prompt = "Launch with docker: ", default = "false", repos = { "bms", "escu" } },
     { var = "echandia_launch_metrics", prompt = "Launch metrics stack: ", default = "false", repos = { "bms" } },
     { var = "echandia_launch_gen_config", prompt = "Generate config on launch: ", default = "false", repos = { "bms", "escu" } },
-    { var = "echandia_sil_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "sil" } },
-    { var = "echandia_sil_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "sil" } },
-    { var = "echandia_sil_module_sim", prompt = "Module simulator (lumped | cell): ", default = "lumped", repos = { "sil" } },
-    { var = "echandia_sil_ch1", prompt = "CMUs on CAN channel 1 (0..28 | none): ", default = "none", repos = { "sil" } },
-    { var = "echandia_sil_ch2", prompt = "CMUs on CAN channel 2 (0..28 | none): ", default = "none", repos = { "sil" } },
+    { var = "echandia_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "escu", "sil" } },
+    { var = "echandia_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "bms", "sil" } },
+    { var = "echandia_module_sim", prompt = "Module simulator (lumped | cell): ", default = "lumped", repos = { "escu", "sil" } },
+    { var = "echandia_ch1", prompt = "CMUs on CAN channel 1 (0..28 | none): ", default = "none", repos = { "bms", "sil" } },
+    { var = "echandia_ch2", prompt = "CMUs on CAN channel 2 (0..28 | none): ", default = "none", repos = { "bms", "sil" } },
     { var = "echandia_sil_boxe", prompt = "Box mode subnet 10.10.10.0/24 (--boxe): ", default = "false", repos = { "sil" } },
     { var = "echandia_sil_password", prompt = "SIL password: ", default = "", repos = { "sil" } },
 }
+
+local function config_spec(var)
+    for _, c in ipairs(CONFIGS) do
+        if c.var == var then
+            return { var, c.prompt, c.default }
+        end
+    end
+end
 
 -- Walk every config relevant to the current repo, one prompt after another.
 -- Enter keeps the shown value (current or default) and moves on; Esc on a
@@ -414,7 +421,7 @@ function M.build(after)
                                 vim.fn.shellescape(pw),
                                 vim.fn.shellescape(arch)
                             )
-                            local scus = vim.g.echandia_sil_scus
+                            local scus = vim.g.echandia_scus
                             if scus and scus ~= "" then
                                 cmd = cmd .. " -n " .. vim.fn.shellescape(tostring(scus))
                             end
@@ -661,35 +668,35 @@ function M.launch_sil()
         return
     end
     M.ensure_vars({
-        { "echandia_sil_scus",        "SCU count: ",                                     "1" },
-        { "echandia_sil_escu_hw",     "EScu hardware type (-w, e.g. 10 = s05 | none): ", "none" },
-        { "echandia_sil_module_type", "Module type (23ah | 20ah | 26ah | 155ah): ",      "23ah" },
-        { "echandia_sil_module_sim",  "Module simulator (lumped | cell): ",              "lumped" },
-        { "echandia_sil_ch1",         "CMUs on CAN channel 1 (0..28 | none): ",          "none" },
-        { "echandia_sil_ch2",         "CMUs on CAN channel 2 (0..28 | none): ",          "none" },
-        { "echandia_sil_boxe",        "Box mode subnet 10.10.10.0/24 (--boxe): ",        "false" },
-        { "echandia_sil_password",    "SIL password: ",                                  "" },
+        config_spec("echandia_scus"),
+        config_spec("echandia_escu_hw"),
+        config_spec("echandia_module_type"),
+        config_spec("echandia_module_sim"),
+        config_spec("echandia_ch1"),
+        config_spec("echandia_ch2"),
+        config_spec("echandia_sil_boxe"),
+        config_spec("echandia_sil_password"),
     }, function(vals)
         local cmd = string.format(
             "cd %s && { ./teardown.sh || true; } && ./setup.sh -s %s --password %s --module-type %s",
             vim.fn.shellescape(sil_dir),
-            vim.fn.shellescape(tostring(vals.echandia_sil_scus)),
+            vim.fn.shellescape(tostring(vals.echandia_scus)),
             vim.fn.shellescape(vals.echandia_sil_password),
-            vim.fn.shellescape(vals.echandia_sil_module_type)
+            vim.fn.shellescape(vals.echandia_module_type)
         )
-        local hw = vals.echandia_sil_escu_hw
+        local hw = vals.echandia_escu_hw
         if hw ~= "none" and hw ~= "" then
             cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
         end
-        local sim = vals.echandia_sil_module_sim
+        local sim = vals.echandia_module_sim
         if sim ~= "lumped" and sim ~= "" then
             cmd = cmd .. " --module-sim " .. vim.fn.shellescape(sim)
         end
-        local ch1 = vals.echandia_sil_ch1
+        local ch1 = vals.echandia_ch1
         if ch1 ~= "none" and ch1 ~= "" then
             cmd = cmd .. " --ch1 " .. vim.fn.shellescape(ch1)
         end
-        local ch2 = vals.echandia_sil_ch2
+        local ch2 = vals.echandia_ch2
         if ch2 ~= "none" and ch2 ~= "" then
             cmd = cmd .. " --ch2 " .. vim.fn.shellescape(ch2)
         end
@@ -712,39 +719,69 @@ function M.launch()
     end
     local cwd = vim.fn.getcwd()
     M.ensure_gen_config(function(gen_config)
-        local cmd
-        local use_docker = vim.g.echandia_launch_docker == "true"
         local gen = gen_config == "true"
+        local function finish(cmd)
+            if vim.g.echandia_launch_docker == "true" then
+                cmd = cmd .. " -d"
+            end
+            M.run_in_float(cmd)
+        end
         if repo == "bms" then
-            cmd = string.format("%s/launch_bms.sh -s %s", SCRIPTS_DIR, vim.fn.shellescape(cwd .. "/EBMS"))
+            local cmd = string.format("%s/launch_bms.sh -s %s", SCRIPTS_DIR, vim.fn.shellescape(cwd .. "/EBMS"))
             -- Metrics stack (Victoria Metrics + OTel + Grafana) is docker-only
             -- and launch_bms.sh aborts if docker is down, so it's opt-in.
             if vim.g.echandia_launch_metrics == "true" then
                 cmd = cmd .. " -m"
             end
-            if gen then
-                cmd = cmd .. " -g"
-                local scus = vim.g.echandia_bms_scus
-                if scus and scus ~= "" then
-                    cmd = cmd .. " -n " .. vim.fn.shellescape(tostring(scus))
+            if not gen then
+                finish(cmd)
+                return
+            end
+            M.ensure_vars({
+                config_spec("echandia_scus"),
+                config_spec("echandia_module_type"),
+                config_spec("echandia_ch1"),
+                config_spec("echandia_ch2"),
+            }, function(vals)
+                cmd = cmd .. " -g -n " .. vim.fn.shellescape(tostring(vals.echandia_scus))
+                    .. " --module-type " .. vim.fn.shellescape(vals.echandia_module_type)
+                local ch1 = vals.echandia_ch1
+                if ch1 ~= "none" and ch1 ~= "" then
+                    cmd = cmd .. " --ch1 " .. vim.fn.shellescape(ch1)
                 end
-            end
-        else
-            cmd = string.format(
-                "%s/launch_escu.sh -s %s -t %s",
-                SCRIPTS_DIR,
-                vim.fn.shellescape(cwd),
-                vim.fn.shellescape(cwd .. "/../sil")
-            )
-            if gen then
-                cmd = cmd .. " -i"
-            end
+                local ch2 = vals.echandia_ch2
+                if ch2 ~= "none" and ch2 ~= "" then
+                    cmd = cmd .. " --ch2 " .. vim.fn.shellescape(ch2)
+                end
+                finish(cmd)
+            end)
+            return
         end
-        if use_docker then
-            cmd = cmd .. " -d"
+        local cmd = string.format(
+            "%s/launch_escu.sh -s %s -t %s",
+            SCRIPTS_DIR,
+            vim.fn.shellescape(cwd),
+            vim.fn.shellescape(cwd .. "/../sil")
+        )
+        if gen then
+            cmd = cmd .. " -i"
         end
-
-        M.run_in_float(cmd)
+        M.ensure_vars({
+            config_spec("echandia_scus"),
+            config_spec("echandia_escu_hw"),
+            config_spec("echandia_module_sim"),
+        }, function(vals)
+            cmd = cmd .. " -n " .. vim.fn.shellescape(tostring(vals.echandia_scus))
+            local hw = vals.echandia_escu_hw
+            if hw ~= "none" and hw ~= "" then
+                cmd = cmd .. " -w " .. vim.fn.shellescape(hw)
+            end
+            local sim = vals.echandia_module_sim
+            if sim ~= "lumped" and sim ~= "" then
+                cmd = cmd .. " --module-sim " .. vim.fn.shellescape(sim)
+            end
+            finish(cmd)
+        end)
     end)
 end
 
