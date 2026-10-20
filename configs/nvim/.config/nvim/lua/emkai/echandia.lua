@@ -269,6 +269,7 @@ function M.run_in_float(cmd, on_success)
     vim.keymap.set("n", "q", close, opts)
     vim.keymap.set("n", "<Esc>", close, opts)
     vim.cmd("startinsert")
+    return close
 end
 
 function M.deploy()
@@ -334,13 +335,25 @@ function M.deploy()
     end)
 end
 
-function M.build()
+function M.build(after)
     local repo = M.detect_repo()
     if not repo then
         notify_err("Not in a bms, escu, or sil repo")
         return
     end
     local cwd = vim.fn.getcwd()
+    local function run_build(cmd, bump)
+        local close
+        close = M.run_in_float(cmd, function()
+            if bump then
+                bump()
+            end
+            if after then
+                close()
+                after()
+            end
+        end)
+    end
 
     if repo == "bms" then
         M.ensure_build_mode("bms", function(mode)
@@ -363,7 +376,7 @@ function M.build()
                         vim.fn.shellescape(version),
                         mode_flag
                     )
-                    M.run_in_float(cmd)
+                    run_build(cmd)
                 end)
             end)
         end)
@@ -408,7 +421,7 @@ function M.build()
                             if mode == "bundle_local" then
                                 cmd = cmd .. " -l"
                             end
-                            M.run_in_float(cmd, bump)
+                            run_build(cmd, bump)
                         end)
                     end
                     if mode == "bundle_local" then
@@ -437,7 +450,7 @@ function M.build()
                         notify_err("Not in a feature workspace (need bms/, escu/, sil/ siblings)")
                         return
                     end
-                    M.run_in_float(string.format(
+                    run_build(string.format(
                         "%s/deploy_sil.sh -s %s -v %s -l",
                         SCRIPTS_DIR,
                         vim.fn.shellescape(workspace),
@@ -469,7 +482,7 @@ function M.build()
                         vim.fn.shellescape(workspace)
                     ))
                 end
-                M.run_in_float(table.concat(parts, " && "), bump)
+                run_build(table.concat(parts, " && "), bump)
             end
             if mode == "tools" then
                 run(nil) -- build_sil_tools takes no version
@@ -489,7 +502,7 @@ function M.build()
                             vim.fn.shellescape(version),
                             vim.fn.shellescape(arch)
                         )
-                        M.run_in_float(cmd)
+                        run_build(cmd)
                     end)
                 end)
             elseif mode == "sil_local" then
@@ -498,14 +511,14 @@ function M.build()
                     SCRIPTS_DIR,
                     vim.fn.shellescape(cwd)
                 )
-                M.run_in_float(cmd)
+                run_build(cmd)
             else
                 local cmd = string.format(
                     "%s/build_escu.sh -s %s",
                     SCRIPTS_DIR,
                     vim.fn.shellescape(cwd)
                 )
-                M.run_in_float(cmd)
+                run_build(cmd)
             end
         end)
     end
@@ -735,6 +748,10 @@ function M.launch()
     end)
 end
 
+function M.build_and_launch()
+    M.build(M.launch)
+end
+
 -- Single source of truth for which command is bound in which repo. remap.lua
 -- iterates this and binds only the entries whose `repos` include the detected
 -- repo, so commands never show where they don't apply. SIL has no remote deploy
@@ -746,6 +763,7 @@ M.keymaps = {
     { lhs = "ec", fn = M.clean,             repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
     { lhs = "ed", fn = M.deploy,            repos = { "bms", "escu" },        desc = "Echandia deploy" },
     { lhs = "el", fn = M.launch,            repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
+    { lhs = "eL", fn = M.build_and_launch,  repos = { "bms", "escu", "sil" }, desc = "Echandia build and launch" },
     { lhs = "eg", fn = M.generate_embedded, repos = { "bms", "escu" },        desc = "Echandia generate embedded" },
     { lhs = "en", fn = M.generate_nswag,    repos = { "bms" },                desc = "Echandia generate nswag (bms)" },
     { lhs = "es", fn = M.configure,         repos = { "bms", "escu", "sil" }, desc = "Echandia settings (walk all configs)" },
