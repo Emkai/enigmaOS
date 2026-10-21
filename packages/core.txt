@@ -114,3 +114,5 @@ kvantum
 # Power/hardware management
 bolt
 powertop
+tlp            # laptop battery/power management (tlp.service)
+tlp-pd         # power profile switching from the bar (power-profiles D-Bus API)

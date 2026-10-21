@@ -38,6 +38,12 @@ Scope {
     readonly property color hoverBg: Qt.rgba(accent.r, accent.g, accent.b, 0.10)
     readonly property color dueLate: "#e2707a" // deadline already gone
     readonly property color dueSoon: "#d9a55c" // deadline lands today
+    readonly property color cardBg: "#141619"
+    readonly property color cardBorder: "#262a31"
+    readonly property color divider: "#1f2329"
+    readonly property color track: "#23272e"
+    readonly property color ok: "#7fcf8e"
+    readonly property color okBg: Qt.rgba(0.30, 0.65, 0.40, 0.16)
 
     readonly property string repoScripts: Quickshell.env("HOME") + "/src/enigmaOS/scripts"
 
@@ -96,6 +102,137 @@ Scope {
         }
     }
 
+    // ---- Fans, RAPL power meters and NVIDIA GPU power, every 2s ----
+    property var fans: []
+    property var temps: []
+    readonly property var _tempNames: [
+        ["coretemp|Package id 0", "CPU"], ["dell_ddv|Video", "GPU"], ["dell_ddv|SODIMM", "RAM"],
+        ["nvme|Composite", "SSD"], ["iwlwifi|", "Wi-Fi"], ["BAT0|temp", "Battery"], ["dell_ddv|Ambient", "Ambient"]
+    ]
+    property var raplWatts: ({})
+    property var _prevRapl: ({})
+    property var nvidiaWatts: null
+    property bool nvidiaPoll: false
+    property string platformProfile: ""
+    property string cpuEpp: ""
+    property string turbo: ""
+    property var fanChoices: []
+    property var eppChoices: []
+
+    function powerPreset(p) {
+        if (p === PowerProfile.Performance)
+            return { fan: "performance", epp: "balance_performance", turbo: "on" };
+        if (p === PowerProfile.PowerSaver)
+            return { fan: "quiet", epp: "power", turbo: "off" };
+        return { fan: "balanced", epp: "balance_power", turbo: "on" };
+    }
+
+    readonly property bool powerCustom: {
+        if (platformProfile === "" || cpuEpp === "" || turbo === "")
+            return false;
+        const want = powerPreset(PowerProfiles.profile);
+        return platformProfile !== want.fan || cpuEpp !== want.epp || turbo !== want.turbo;
+    }
+
+    function setPower(fan, epp, turbo) {
+        powerWriteProc.command = ["sh", "-c", `
+[ -n "$1" ] && echo "$1" > /sys/firmware/acpi/platform_profile
+[ -n "$2" ] && for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo "$2" > $f; done
+[ -n "$3" ] && echo "$3" > /sys/devices/system/cpu/intel_pstate/no_turbo
+true`, "sh", fan, epp, turbo === "" ? "" : (turbo === "on" ? "0" : "1")];
+        powerWriteProc.running = true;
+    }
+
+    function applyProfile(p) {
+        PowerProfiles.profile = p;
+        const want = powerPreset(p);
+        setPower(want.fan, want.epp, want.turbo);
+    }
+
+    Process {
+        id: powerWriteProc
+        stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") console.warn("power write:", text.trim()) }
+        onExited: sensorProc.running = true
+    }
+    readonly property int fanMax: fans.reduce((m, f) => Math.max(m, f.rpm), 0)
+
+    function fmtWatts(w) { return w == null ? "" : w.toFixed(1) + " W"; }
+    function fmtNum(w) { return w == null ? "" : w.toFixed(1); }
+
+    Timer { interval: 2000; running: true; repeat: true; triggeredOnStart: true; onTriggered: sensorProc.running = true }
+
+    Process {
+        id: sensorProc
+        command: ["bash", "-c", `
+for h in /sys/class/hwmon/hwmon*; do
+  [ "$(cat $h/name)" = dell_ddv ] && ddv=$h
+  [ "$(cat $h/name)" = dell_smm ] && smm=$h
+  for t in $h/temp*_input; do
+    [ -e "$t" ] && echo "temp|$(cat $h/name)|$(cat \${t%_input}_label 2>/dev/null)|$(cat $t)"
+  done
+done
+for f in $smm/fan*_input; do
+  [ -e "$f" ] || continue
+  n=$(basename \${f%_input})
+  l=$(cat $smm/\${n}_label 2>/dev/null || cat $ddv/\${n}_label 2>/dev/null || echo "fan \${n#fan}")
+  echo "fan|$l|$(cat $f)|$(cat $smm/\${n}_target 2>/dev/null)|$(cat $smm/\${n}_max 2>/dev/null)"
+done
+c=/sys/devices/system/cpu
+echo "prof|$(cat /sys/firmware/acpi/platform_profile 2>/dev/null)|$(cat $c/cpu0/cpufreq/energy_performance_preference 2>/dev/null)|$(cat $c/intel_pstate/no_turbo 2>/dev/null)|$(cat /sys/firmware/acpi/platform_profile_choices 2>/dev/null)|$(cat $c/cpu0/cpufreq/energy_performance_available_preferences 2>/dev/null)"
+for d in /sys/class/powercap/intel-rapl:*; do
+  [ -r $d/energy_uj ] && echo "rapl|$(cat $d/name)|$(cat $d/energy_uj)|$(cat $d/max_energy_range_uj)"
+done
+for d in /sys/bus/pci/devices/*; do
+  [ "$(cat $d/vendor)" = 0x10de ] && [[ $(cat $d/class) == 0x03* ]] || continue
+  if [ "$1" = 1 ] && [ "$(cat $d/power/runtime_status)" = active ]; then
+    echo "gpu|$(nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits | head -n1)"
+  else
+    echo "gpu|asleep"
+  fi
+done`, "bash", root.nvidiaPoll ? "1" : "0"]
+        stdout: StdioCollector {
+            id: sensorCollector
+            onStreamFinished: {
+                const now = Date.now();
+                const fans = [];
+                const temps = {};
+                const watts = {};
+                const prev = {};
+                let gpu = null;
+                for (const line of sensorCollector.text.split("\n")) {
+                    const p = line.split("|");
+                    if (p[0] === "temp") {
+                        const key = p[1].replace(/_\d+$/, "") + "|" + p[2];
+                        temps[key] = Math.max(temps[key] ?? -Infinity, Number(p[3]) / 1000);
+                    } else if (p[0] === "fan")
+                        fans.push({ label: p[1], rpm: Number(p[2]), target: Number(p[3]), max: Number(p[4]) || 0 });
+                    else if (p[0] === "prof") {
+                        root.platformProfile = p[1];
+                        root.cpuEpp = p[2];
+                        root.turbo = p[3] === "" ? "" : (p[3] === "1" ? "off" : "on");
+                        root.fanChoices = p[4].trim().split(/\s+/).filter(x => x);
+                        root.eppChoices = p[5].trim().split(/\s+/).filter(x => x && x !== "default");
+                    }
+                    else if (p[0] === "rapl") {
+                        const e = Number(p[2]);
+                        prev[p[1]] = { e: e, t: now };
+                        const last = root._prevRapl[p[1]];
+                        if (last && now > last.t) {
+                            const dE = e >= last.e ? e - last.e : e + Number(p[3]) - last.e;
+                            watts[p[1]] = dE / (now - last.t) / 1000;
+                        }
+                    } else if (p[0] === "gpu")
+                        gpu = p[1] === "asleep" ? -1 : (isNaN(Number(p[1])) ? null : Number(p[1]));
+                }
+                root.fans = fans;
+                root.temps = root._tempNames.filter(n => temps[n[0]] !== undefined).map(n => ({ label: n[1], c: temps[n[0]] }));
+                root.raplWatts = watts;
+                root._prevRapl = prev;
+                root.nvidiaWatts = gpu;
+            }
+        }
+    }
+
     // ---- RAM usage: MemTotal - MemAvailable, every 2s ----
     property real ramGiB: 0
 
@@ -125,7 +262,7 @@ Scope {
 
     Process {
         id: topCpuProc
-        command: ["bash", "-c", "ps -eo pcpu=,comm= | sort -rn -k1 | head -n 10"]
+        command: ["bash", "-c", `ps -eo pcpu=,comm= | awk '{p=$1; $1=""; n=substr($0,2); a[n]+=p; c[n]++} END{for(n in a) printf "%.1f %d %s\\n", a[n], c[n], n}' | sort -rn -k1 | head -n 8`]
         stdout: StdioCollector {
             id: topCpuCollector
             onStreamFinished: {
@@ -133,9 +270,10 @@ Scope {
                 for (const line of topCpuCollector.text.split("\n")) {
                     const t = line.trim();
                     if (!t) continue;
-                    const sp = t.indexOf(" ");
-                    if (sp < 0) continue;
-                    out.push({ name: t.slice(sp + 1).trim(), pct: t.slice(0, sp) + "%" });
+                    const m = t.match(/^(\S+) (\d+) (.+)$/);
+                    if (!m) continue;
+                    const v = Number(m[1]);
+                    out.push({ name: m[3], count: Number(m[2]), v: v, pct: (v >= 100 ? Math.round(v) : v.toFixed(1)) + "%" });
                 }
                 root.topCpuList = out;
             }
@@ -144,7 +282,7 @@ Scope {
 
     Process {
         id: topRamProc
-        command: ["bash", "-c", "ps -eo rss=,comm= | awk '{a[$2]+=$1} END{for(n in a) printf \"%d %s\\n\", a[n], n}' | sort -rn -k1 | head -n 10"]
+        command: ["bash", "-c", `ps -eo rss=,comm= | awk '{r=$1; $1=""; n=substr($0,2); a[n]+=r; c[n]++} END{for(n in a) printf "%d %d %s\\n", a[n], c[n], n}' | sort -rn -k1 | head -n 8`]
         stdout: StdioCollector {
             id: topRamCollector
             onStreamFinished: {
@@ -152,11 +290,10 @@ Scope {
                 for (const line of topRamCollector.text.split("\n")) {
                     const t = line.trim();
                     if (!t) continue;
-                    const sp = t.indexOf(" ");
-                    if (sp < 0) continue;
-                    const kib = Number(t.slice(0, sp));
-                    const mib = kib / 1024;
-                    out.push({ name: t.slice(sp + 1).trim(), v: mib >= 1024 ? (mib / 1024).toFixed(1) + " GiB" : Math.round(mib) + " MiB" });
+                    const m = t.match(/^(\d+) (\d+) (.+)$/);
+                    if (!m) continue;
+                    const mib = Number(m[1]) / 1024;
+                    out.push({ name: m[3], count: Number(m[2]), mib: mib, v: mib >= 1024 ? (mib / 1024).toFixed(1) + " GiB" : Math.round(mib) + " MiB" });
                 }
                 root.topRamList = out;
             }
@@ -374,11 +511,11 @@ Scope {
             left: align !== "right"
             right: align === "right"
         }
-        margins.top: root.dropdownTopMargin
+        margins.top: root.dropdownTopMargin + 6
         margins.left: align === "center" ? Math.round((screenWidth - implicitWidth) / 2) : 12
         margins.right: 12
         implicitWidth: Math.max(minWidth, Math.min(maxWidth, contentWidth + 2 * col.x))
-        implicitHeight: col.implicitHeight + 20
+        implicitHeight: col.implicitHeight + 2 * col.y
 
         // Natural width of an item tree. Positioners (Row/Column/Grid/Flow) can't
         // report one: their implicitWidth is read-only and tracks their children's
@@ -431,25 +568,202 @@ Scope {
 
         Rectangle {
             anchors.fill: parent
-            color: root.bg
+            color: root.cardBg
+            radius: 2
             border.width: 1
-            border.color: root.hairline
+            border.color: root.cardBorder
 
             Column {
                 id: col
-                x: 12
-                y: 10
-                width: parent.width - 24
-                spacing: 4
+                x: 18
+                y: 16
+                width: parent.width - 36
+                spacing: 6
             }
         }
     }
 
     component SectionLabel: Text {
-        color: root.textDimmer
+        color: root.textDim
         font.family: Theme.fontFamily
         font.pixelSize: 12
-        font.letterSpacing: 1
+        font.weight: Font.DemiBold
+        font.letterSpacing: 1.5
+        topPadding: 4
+        bottomPadding: 2
+    }
+
+    component Divider: Rectangle {
+        x: -18
+        width: parent ? parent.width + 36 : 0
+        height: 1
+        color: root.divider
+    }
+
+    component Meter: Rectangle {
+        property real frac: 0
+        property color fill: root.accent
+        width: parent ? parent.width : 0
+        height: 4
+        radius: 2
+        color: root.track
+        Rectangle {
+            width: parent.width * Math.max(0, Math.min(1, parent.frac))
+            height: parent.height
+            radius: 2
+            color: parent.fill
+        }
+    }
+
+    component StatRow: Item {
+        property string label
+        property string value
+        property string unit
+        property bool sub: false
+        property color valueColor: sub ? root.textDim : root.textBright
+        width: parent ? parent.width : 0
+        implicitWidth: (sub ? 20 : 0) + statLabel.implicitWidth + 32 + statValue.implicitWidth
+        implicitHeight: 24
+        Text {
+            id: statLabel
+            x: parent.sub ? 20 : 0
+            anchors.verticalCenter: parent.verticalCenter
+            text: parent.label
+            color: parent.sub ? root.textDim : root.textDefault
+            font.family: Theme.fontFamily
+            font.pixelSize: 14
+        }
+        Row {
+            id: statValue
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 6
+            Text { text: statValue.parent.value; color: statValue.parent.valueColor; font.family: Theme.fontFamily; font.pixelSize: 14 }
+            Text { visible: text !== ""; text: statValue.parent.unit; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 14 }
+        }
+    }
+
+    property string powerChoiceOpen: ""
+
+    component ChoiceRow: Column {
+        id: ch
+        property string label
+        property string value
+        property var choices: []
+        property var hover
+        readonly property bool open: root.powerChoiceOpen === label
+        signal picked(string v)
+        width: parent ? parent.width : 0
+        Item {
+            width: parent.width
+            implicitWidth: 20 + chLabel.implicitWidth + 32 + chBtn.width
+            implicitHeight: 28
+            Text { id: chLabel; x: 20; anchors.verticalCenter: parent.verticalCenter; text: ch.label; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 14 }
+            Rectangle {
+                id: chBtn
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 190
+                height: 26
+                radius: 2
+                color: chMa.containsMouse ? root.hoverBg : "transparent"
+                border.width: 1
+                border.color: ch.open || chMa.containsMouse ? root.accent : root.cardBorder
+                Text { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: ch.value.replace(/_/g, " "); color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: ch.open ? "\u25b4" : "\u25be"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                MouseArea { id: chMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.powerChoiceOpen = ch.open ? "" : ch.label }
+            }
+        }
+        PopupWindow {
+            visible: ch.open && ch.visible
+            anchor.item: chBtn
+            anchor.rect.y: chBtn.height + 2
+            implicitWidth: chBtn.width
+            implicitHeight: chList.implicitHeight + 6
+            color: "transparent"
+            HoverHandler { onHoveredChanged: hovered ? ch.hover.enter() : ch.hover.leave() }
+            Rectangle {
+                anchors.fill: parent
+                radius: 2
+                color: root.bg
+                border.width: 1
+                border.color: root.cardBorder
+                Column {
+                    id: chList
+                    x: 3
+                    y: 3
+                    width: parent.width - 6
+                    Repeater {
+                        model: ch.choices
+                        delegate: Rectangle {
+                            required property string modelData
+                            width: chList.width
+                            height: 26
+                            radius: 2
+                            color: optMa.containsMouse ? root.hoverBg : "transparent"
+                            Text { anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter; text: modelData.replace(/_/g, " "); color: modelData === ch.value ? root.accent : root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                            MouseArea {
+                                id: optMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    root.powerChoiceOpen = "";
+                                    ch.picked(modelData);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component SwitchRow: Item {
+        id: sw
+        property string label
+        property bool checked: false
+        signal toggled()
+        width: parent ? parent.width : 0
+        implicitWidth: 20 + swLabel.implicitWidth + 32 + 34
+        implicitHeight: 26
+        Text { id: swLabel; x: 20; anchors.verticalCenter: parent.verticalCenter; text: sw.label; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 14 }
+        Rectangle {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: 34
+            height: 18
+            radius: 9
+            color: sw.checked ? root.accent : root.track
+            Rectangle {
+                x: sw.checked ? parent.width - width - 3 : 3
+                anchors.verticalCenter: parent.verticalCenter
+                width: 12
+                height: 12
+                radius: 6
+                color: root.textBright
+                Behavior on x { NumberAnimation { duration: 120 } }
+            }
+            MouseArea { anchors.fill: parent; onClicked: sw.toggled() }
+        }
+    }
+
+    component ProcRow: Column {
+        property string name
+        property int count: 1
+        property string value
+        property real frac: 0
+        width: parent ? parent.width : 0
+        spacing: 5
+        bottomPadding: 4
+        Item {
+            width: parent.width
+            implicitWidth: procName.implicitWidth + procCount.implicitWidth + 40 + procValue.implicitWidth
+            implicitHeight: 20
+            Text { id: procName; anchors.verticalCenter: parent.verticalCenter; text: parent.parent.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 14; elide: Text.ElideRight; width: Math.min(implicitWidth, parent.width - procValue.width - procCount.implicitWidth - 16) }
+            Text { id: procCount; anchors.left: procName.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; visible: parent.parent.count > 1; text: "\u00d7" + parent.parent.count; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12 }
+            Text { id: procValue; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: parent.parent.value; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14 }
+        }
+        Meter { frac: parent.frac }
     }
 
     // Bordered, hover-highlighted click target for dropdown rows/links.
@@ -464,9 +778,9 @@ Scope {
         implicitHeight: 22
         height: implicitHeight
         opacity: enabled ? 1 : 0.4
-        radius: 3
+        radius: 2
         border.width: 1
-        border.color: ma.containsMouse ? root.accent : (discrete ? "transparent" : root.hairline)
+        border.color: ma.containsMouse ? root.accent : (discrete ? "transparent" : root.cardBorder)
         color: ma.containsMouse ? root.hoverBg : "transparent"
 
         Item {
@@ -1131,7 +1445,14 @@ Scope {
             HoverState { id: hsVol }
             HoverState { id: hsBt }
             HoverState { id: hsNet }
-            HoverState { id: hsPow }
+            HoverState {
+                id: hsPow
+                onOpenChanged: {
+                    root.nvidiaPoll = open;
+                    if (!open)
+                        root.powerChoiceOpen = "";
+                }
+            }
 
             // ---- Workspaces (native Hyprland IPC, filtered to this monitor) ----
             property var wsList: []
@@ -1552,16 +1873,26 @@ Scope {
                     spacing: 0
 
                     Rectangle {
-                        width: cpuText.implicitWidth + 20
+                        width: cpuRow.implicitWidth + 20
                         height: root.barHeight
                         color: hsCpu.open ? root.hoverBg : "transparent"
-                        Text {
-                            id: cpuText
+                        Row {
+                            id: cpuRow
                             anchors.centerIn: parent
-                            text: Math.round(root.cpuPct) + "%"
-                            color: root.textBright
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 13
+                            spacing: 10
+                            Text {
+                                text: Math.round(root.cpuPct) + "%"
+                                color: root.textBright
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                visible: root.fans.length > 0
+                                text: "󰈐 " + root.fanMax
+                                color: root.fanMax > 3000 ? root.dueSoon : root.textBright
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -1629,16 +1960,58 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsCpu
                     align: "center"
-                    minWidth: 260
+                    minWidth: 380
 
-                    SectionLabel { text: "CPU BY PROCESS" }
+                    SectionLabel { text: "FANS"; visible: root.fans.length > 0 }
+                    Repeater {
+                        model: root.fans
+                        delegate: Column {
+                            required property var modelData
+                            readonly property real frac: modelData.max > 0 ? modelData.rpm / modelData.max : 0
+                            width: parent.width
+                            spacing: 4
+                            bottomPadding: 6
+                            StatRow { label: modelData.label; value: String(modelData.rpm); unit: "rpm" }
+                            Meter { frac: parent.frac; fill: parent.frac > 0.75 ? root.dueSoon : root.accent }
+                        }
+                    }
+
+                    SectionLabel { text: "TEMPERATURES"; visible: root.temps.length > 0 }
+                    Grid {
+                        id: tempGrid
+                        width: parent.width
+                        columns: 2
+                        columnSpacing: 32
+                        Repeater {
+                            model: root.temps
+                            delegate: StatRow {
+                                required property var modelData
+                                width: (tempGrid.width - tempGrid.columnSpacing) / 2
+                                label: modelData.label
+                                value: Math.round(modelData.c) + "\u00b0"
+                                valueColor: modelData.c >= 85 ? root.dueLate : modelData.c >= 70 ? root.dueSoon : root.textBright
+                            }
+                        }
+                    }
+
+                    SectionLabel { text: "CPU POWER"; visible: root.raplWatts["package-0"] !== undefined }
+                    StatRow { visible: root.raplWatts["package-0"] !== undefined; label: "Package"; value: root.fmtNum(root.raplWatts["package-0"]); unit: "W" }
+                    StatRow { visible: root.raplWatts["core"] !== undefined; label: "cores"; value: root.fmtNum(root.raplWatts["core"]); unit: "W"; sub: true }
+
+                    Item {
+                        width: parent.width
+                        implicitHeight: topLbl.implicitHeight
+                        SectionLabel { id: topLbl; text: "TOP PROCESSES" }
+                        Text { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.bottomMargin: 2; text: "% of one core"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                    }
                     Repeater {
                         model: root.topCpuList
-                        delegate: Row {
+                        delegate: ProcRow {
                             required property var modelData
-                            width: parent.width
-                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 50 }
-                            Text { text: modelData.pct; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 50; horizontalAlignment: Text.AlignRight }
+                            name: modelData.name
+                            count: modelData.count
+                            value: modelData.pct
+                            frac: modelData.v / Math.max(100, root.topCpuList[0].v)
                         }
                     }
                 }
@@ -1647,16 +2020,17 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsRam
                     align: "center"
-                    minWidth: 260
+                    minWidth: 340
 
                     SectionLabel { text: "MEMORY BY PROCESS" }
                     Repeater {
                         model: root.topRamList
-                        delegate: Row {
+                        delegate: ProcRow {
                             required property var modelData
-                            width: parent.width
-                            Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 60 }
-                            Text { text: modelData.v; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 60; horizontalAlignment: Text.AlignRight }
+                            name: modelData.name
+                            count: modelData.count
+                            value: modelData.v
+                            frac: modelData.mib / root.topRamList[0].mib
                         }
                     }
                 }
@@ -2448,36 +2822,192 @@ Scope {
                     barScreen: barWin.screen
                     hover: hsPow
                     align: "right"
-                    minWidth: 216
+                    minWidth: 340
 
-                    SectionLabel { text: "POWER" }
+                    Item {
+                        width: parent.width
+                        implicitHeight: 24
+                        SectionLabel { anchors.verticalCenter: parent.verticalCenter; text: "POWER DRAW" }
+                        Rectangle {
+                            readonly property var dev: UPower.displayDevice
+                            readonly property int st: dev ? dev.state : -1
+                            readonly property bool draining: st === UPowerDeviceState.Discharging
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: pill.implicitWidth + 20
+                            height: 24
+                            radius: 12
+                            color: draining ? Qt.rgba(0.85, 0.65, 0.36, 0.16) : root.okBg
+                            Row {
+                                id: pill
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: parent.parent.st === UPowerDeviceState.Charging ? "󰂄" : parent.parent.draining ? "󰁹" : "󰚥"
+                                    color: parent.parent.draining ? root.dueSoon : root.ok
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 13
+                                }
+                                Text {
+                                    text: parent.parent.st === UPowerDeviceState.Charging ? "Charging " + root.fmtWatts(parent.parent.dev.changeRate)
+                                        : parent.parent.draining ? "Battery " + root.fmtWatts(parent.parent.dev.changeRate) : "On AC"
+                                    color: parent.parent.draining ? root.dueSoon : root.ok
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 13
+                                }
+                            }
+                        }
+                    }
+
+                    Row {
+                        spacing: 10
+                        topPadding: 2
+                        bottomPadding: 8
+                        Text {
+                            id: bigWatts
+                            text: root.raplWatts["psys"] !== undefined ? root.fmtNum(root.raplWatts["psys"]) : "\u2014"
+                            color: root.textBright
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 34
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            anchors.baseline: bigWatts.baseline
+                            text: "W system"
+                            color: root.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 15
+                        }
+                    }
+
+                    StatRow { visible: root.raplWatts["package-0"] !== undefined; label: "CPU package"; value: root.fmtNum(root.raplWatts["package-0"]); unit: "W" }
+                    StatRow { visible: root.raplWatts["core"] !== undefined; label: "cores"; value: root.fmtNum(root.raplWatts["core"]); unit: "W"; sub: true }
+                    StatRow { visible: root.nvidiaWatts !== null; label: "NVIDIA GPU"; value: root.nvidiaWatts === -1 ? "asleep" : root.fmtNum(root.nvidiaWatts); unit: root.nvidiaWatts === -1 ? "" : "W"; valueColor: root.nvidiaWatts === -1 ? root.textDim : root.textBright }
+                    StatRow { visible: root.raplWatts["uncore"] !== undefined; label: "Intel GPU"; value: root.fmtNum(root.raplWatts["uncore"]); unit: "W" }
+
+                    Item { width: 1; height: 6 }
+                    Divider {}
+                    Item { width: 1; height: 4 }
+
+                    Item {
+                        width: parent.width
+                        implicitHeight: 22
+                        SectionLabel { anchors.verticalCenter: parent.verticalCenter; text: "PROFILE" }
+                        Rectangle {
+                            visible: root.powerCustom
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: customTxt.implicitWidth + 18
+                            height: 20
+                            radius: 10
+                            color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+                            Text { id: customTxt; anchors.centerIn: parent; text: "Custom"; color: root.accent; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                        }
+                    }
+                    Row {
+                        id: profRow
+                        width: parent.width
+                        spacing: 6
+                        Repeater {
+                            model: [
+                                { name: "Saver", p: PowerProfile.PowerSaver },
+                                { name: "Balanced", p: PowerProfile.Balanced },
+                                { name: "Performance", p: PowerProfile.Performance }
+                            ]
+                            delegate: Rectangle {
+                                required property var modelData
+                                readonly property bool active: !root.powerCustom && PowerProfiles.profile === modelData.p
+                                width: (profRow.width - 2 * profRow.spacing) / 3
+                                height: 30
+                                radius: 2
+                                color: active ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18) : (profMa.containsMouse ? root.hoverBg : "transparent")
+                                border.width: 1
+                                border.color: active ? root.accent : root.cardBorder
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.name
+                                    color: parent.active ? root.textBright : root.textDefault
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    id: profMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: root.applyProfile(modelData.p)
+                                }
+                            }
+                        }
+                    }
+                    Item { width: 1; height: 2 }
+                    ChoiceRow {
+                        visible: root.platformProfile !== ""
+                        label: "Fan mode"
+                        value: root.platformProfile
+                        choices: root.fanChoices
+                        hover: hsPow
+                        onPicked: v => root.setPower(v, "", "")
+                    }
+                    ChoiceRow {
+                        visible: root.cpuEpp !== ""
+                        label: "CPU preference"
+                        value: root.cpuEpp
+                        choices: root.eppChoices
+                        hover: hsPow
+                        onPicked: v => root.setPower("", v, "")
+                    }
+                    SwitchRow {
+                        visible: root.turbo !== ""
+                        label: "Turbo boost"
+                        checked: root.turbo === "on"
+                        onToggled: root.setPower("", "", root.turbo === "on" ? "off" : "on")
+                    }
+
+                    Item { width: 1; height: 6 }
+                    Divider {}
+                    Item { width: 1; height: 4 }
 
                     Repeater {
                         model: [
-                            { name: "lock", key: "l", cmd: ["hyprlock"] },
-                            { name: "suspend", key: "s", cmd: ["systemctl", "suspend"], confirm: true },
-                            { name: "log out", key: "e", cmd: ["hyprctl", "dispatch", "exit"], confirm: true },
-                            { name: "reboot", key: "r", cmd: ["systemctl", "reboot"], confirm: true },
-                            { name: "power off", key: "p", cmd: ["systemctl", "poweroff"], confirm: true }
+                            { name: "Lock", icon: "󰌾", key: "l", cmd: ["hyprlock"] },
+                            { name: "Suspend", icon: "󰤄", key: "s", cmd: ["systemctl", "suspend"], confirm: true },
+                            { name: "Log out", icon: "󰍃", key: "e", cmd: ["hyprctl", "dispatch", "exit"], confirm: true },
+                            { name: "Reboot", icon: "󰜉", key: "r", cmd: ["systemctl", "reboot"], confirm: true, sep: true },
+                            { name: "Power off", icon: "󰐥", key: "p", cmd: ["systemctl", "poweroff"], confirm: true }
                         ]
-                        delegate: MenuButton {
+                        delegate: Column {
                             required property var modelData
                             width: parent.width
-                            onClicked: {
-                                if (!modelData.confirm)
-                                    return Quickshell.execDetached(modelData.cmd);
-                                hsPow.open = false;
-                                root.powerConfirm = modelData;
-                            }
-                            Text {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13
-                            }
-                            Text {
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.key; color: root.textFaint; font.family: Theme.fontFamily; font.pixelSize: 11
+                            spacing: 6
+                            Rectangle { visible: modelData.sep === true; x: 8; width: parent.width - 16; height: 1; color: root.divider }
+                            MenuButton {
+                                width: parent.width
+                                implicitHeight: 36
+                                discrete: true
+                                onClicked: {
+                                    if (!modelData.confirm)
+                                        return Quickshell.execDetached(modelData.cmd);
+                                    hsPow.open = false;
+                                    root.powerConfirm = modelData;
+                                }
+                                Row {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 14
+                                    Text { width: 18; text: modelData.icon; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 16; horizontalAlignment: Text.AlignHCenter }
+                                    Text { text: modelData.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 14 }
+                                }
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 22
+                                    height: 20
+                                    radius: 4
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: root.cardBorder
+                                    Text { anchors.centerIn: parent; text: modelData.key.toUpperCase(); color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 11 }
+                                }
                             }
                         }
                     }

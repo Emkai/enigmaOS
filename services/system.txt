@@ -8,5 +8,6 @@ NetworkManager-wait-online.service
 sddm.service
 systemd-resolved.service
 systemd-timesyncd.service
-tlp.service   # laptop battery/power management (tlp-git, AUR)
+tlp.service   # laptop battery/power management
+tlp-pd.service # power-profiles D-Bus service for the bar's profile switcher
 fstrim.timer

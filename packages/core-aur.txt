@@ -7,6 +7,5 @@ sddm-silent-theme           # the SDDM login theme (login falls back to stock SD
 sddm-theme-tokyo-night-git  # alternate TokyoNight SDDM theme
 tokyonight-gtk-theme-git    # TokyoNight theming for GTK apps
 wl-screenrec                # screen recording bind (Super+Ctrl+V) + waybar recording indicator
-tlp-git                     # laptop battery/power management (tlp.service)
 wireguard-go-git            # userspace WireGuard backend for wg-quick (vpn menu)
 openvpn3                    # OpenVPN entries in the vpn menu + waybar VPN status
