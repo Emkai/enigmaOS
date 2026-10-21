@@ -136,10 +136,9 @@ Scope {
 
     function setPower(fan, epp, turbo) {
         powerWriteProc.command = ["sh", "-c", `
-[ -n "$1" ] && echo "$1" > /sys/firmware/acpi/platform_profile
-[ -n "$2" ] && for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo "$2" > $f; done
-[ -n "$3" ] && echo "$3" > /sys/devices/system/cpu/intel_pstate/no_turbo
-true`, "sh", fan, epp, turbo === "" ? "" : (turbo === "on" ? "0" : "1")];
+if [ -n "$1" ]; then echo "$1" > /sys/firmware/acpi/platform_profile || exit 1; fi
+if [ -n "$2" ]; then for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo "$2" > $f || exit 1; done; fi
+if [ -n "$3" ]; then echo "$3" > /sys/devices/system/cpu/intel_pstate/no_turbo || exit 1; fi`, "sh", fan, epp, turbo === "" ? "" : (turbo === "on" ? "0" : "1")];
         powerWriteProc.running = true;
     }
 
@@ -149,10 +148,15 @@ true`, "sh", fan, epp, turbo === "" ? "" : (turbo === "on" ? "0" : "1")];
         setPower(want.fan, want.epp, want.turbo);
     }
 
+    property string powerError: ""
+
     Process {
         id: powerWriteProc
-        stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") console.warn("power write:", text.trim()) }
-        onExited: sensorProc.running = true
+        stderr: StdioCollector { id: powerWriteErr }
+        onExited: code => {
+            root.powerError = code === 0 ? "" : (powerWriteErr.text.includes("ermission") ? "no write access: run stages/16-power.sh" : "write failed: " + powerWriteErr.text.trim().split("\n").pop());
+            sensorProc.running = true;
+        }
     }
     readonly property int fanMax: fans.reduce((m, f) => Math.max(m, f.rpm), 0)
 
@@ -259,6 +263,8 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
     // ---- Top processes (fetched only while their dropdown is open) ----
     property var topCpuList: []
     property var topRamList: []
+    readonly property real topCpuMax: Math.max(100, topCpuList.length ? topCpuList[0].v : 0)
+    readonly property real topRamMax: Math.max(1, topRamList.length ? topRamList[0].mib : 0)
 
     Process {
         id: topCpuProc
@@ -2011,7 +2017,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             name: modelData.name
                             count: modelData.count
                             value: modelData.pct
-                            frac: modelData.v / Math.max(100, root.topCpuList[0].v)
+                            frac: modelData.v / root.topCpuMax
                         }
                     }
                 }
@@ -2030,7 +2036,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             name: modelData.name
                             count: modelData.count
                             value: modelData.v
-                            frac: modelData.mib / root.topRamList[0].mib
+                            frac: modelData.mib / root.topRamMax
                         }
                     }
                 }
@@ -2955,6 +2961,16 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                         choices: root.eppChoices
                         hover: hsPow
                         onPicked: v => root.setPower("", v, "")
+                    }
+                    Text {
+                        visible: root.powerError !== ""
+                        width: parent.width
+                        leftPadding: 20
+                        text: root.powerError
+                        color: root.dueLate
+                        wrapMode: Text.Wrap
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 12
                     }
                     SwitchRow {
                         visible: root.turbo !== ""
