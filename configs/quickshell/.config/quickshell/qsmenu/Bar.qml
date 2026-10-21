@@ -62,16 +62,28 @@ Scope {
     readonly property var monthNames: ["January", "February", "March", "April", "May", "June",
         "July", "August", "September", "October", "November", "December"]
 
-    function calendarCells(d) {
-        const first = new Date(d.getFullYear(), d.getMonth(), 1);
-        const lead = (first.getDay() + 6) % 7;
-        const days = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-        const cells = [];
-        for (let i = 0; i < lead; i++)
-            cells.push({ t: "", today: false });
-        for (let day = 1; day <= days; day++)
-            cells.push({ t: String(day), today: day === d.getDate() });
-        return cells;
+    readonly property var dayNames: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+    property int calOffset: 0
+    readonly property date calShown: new Date(now.getFullYear(), now.getMonth() + calOffset, 1)
+
+    function calendarWeeks(shown, today) {
+        const y = shown.getFullYear(), m = shown.getMonth();
+        const lead = (shown.getDay() + 6) % 7;
+        const n = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7);
+        const weeks = [];
+        for (let w = 0; w < n; w++) {
+            const days = [];
+            let current = false;
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(y, m, 1 - lead + w * 7 + i);
+                const isToday = d.toDateString() === today.toDateString();
+                current = current || isToday;
+                days.push({ t: d.getDate(), out: d.getMonth() !== m, weekend: i >= 5, today: isToday });
+            }
+            weeks.push({ wk: isoWeek(new Date(y, m, 1 - lead + w * 7)), current: current, days: days });
+        }
+        return weeks;
     }
 
     // ---- CPU usage: delta over /proc/stat every 2s ----
@@ -298,7 +310,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     const m = t.match(/^(\d+) (\d+) (.+)$/);
                     if (!m) continue;
                     const mib = Number(m[1]) / 1024;
-                    out.push({ name: m[3], count: Number(m[2]), mib: mib, v: mib >= 1024 ? (mib / 1024).toFixed(1) + " GiB" : Math.round(mib) + " MiB" });
+                    out.push({ name: m[3], count: Number(m[2]), mib: mib, num: mib >= 1024 ? (mib / 1024).toFixed(1) : String(Math.round(mib)), unit: mib >= 1024 ? "GiB" : "MiB" });
                 }
                 root.topRamList = out;
             }
@@ -344,6 +356,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
 
     // ---- Network details (ip/gateway/link + wifi list), via nmcli/ip ----
     property string netKind: "none" // "ethernet" | "wifi" | "none"
+    property bool wifiRadio: true
     property var netWiredList: []
     property var netVpnList: []
     property var netWifiDevList: []
@@ -357,6 +370,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         command: ["bash", "-c", `
             conn_type=$(nmcli -t -f type,state,connection dev status 2>/dev/null | grep -E '^(wifi|ethernet):connected:' | head -n1 | cut -d: -f1)
             printf 'TYPE\\t%s\\n' "\${conn_type:-none}"
+            printf 'RADIO\\t%s\\n' "$(nmcli radio wifi 2>/dev/null)"
             nmcli -t -f type,state,device dev status 2>/dev/null | grep '^ethernet:connected:' | cut -d: -f3 | while read -r dev; do
                 gw=$(ip -4 route list default dev "$dev" 2>/dev/null | awk '/via/{print $3; exit}')
                 printf 'ETH\\t%s\\t%s\\n' "$dev" "\${gw:-?}"
@@ -403,6 +417,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                 for (const line of netCollector.text.split("\n")) {
                     const p = line.split("\t");
                     if (p[0] === "TYPE") kind = p[1];
+                    else if (p[0] === "RADIO") root.wifiRadio = p[1] === "enabled";
                     else if (p[0] === "ETH") wired.push({ dev: p[1], gw: p[2], addrs: [] });
                     else if (p[0] === "ETHADDR") {
                         const w = wired.find(x => x.dev === p[1]);
@@ -723,6 +738,26 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         }
     }
 
+    component Toggle: Rectangle {
+        id: tg
+        property bool checked: false
+        signal toggled()
+        width: 34
+        height: 18
+        radius: 9
+        color: checked ? root.accent : root.track
+        Rectangle {
+            x: tg.checked ? tg.width - width - 2 : 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: 14
+            height: 14
+            radius: 7
+            color: root.textBright
+            Behavior on x { NumberAnimation { duration: 120 } }
+        }
+        MouseArea { anchors.fill: parent; onClicked: tg.toggled() }
+    }
+
     component SwitchRow: Item {
         id: sw
         property string label
@@ -732,23 +767,53 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         implicitWidth: 20 + swLabel.implicitWidth + 32 + 34
         implicitHeight: 26
         Text { id: swLabel; x: 20; anchors.verticalCenter: parent.verticalCenter; text: sw.label; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 14 }
-        Rectangle {
+        Toggle {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            width: 34
-            height: 18
-            radius: 9
-            color: sw.checked ? root.accent : root.track
-            Rectangle {
-                x: sw.checked ? parent.width - width - 3 : 3
-                anchors.verticalCenter: parent.verticalCenter
-                width: 12
-                height: 12
-                radius: 6
-                color: root.textBright
-                Behavior on x { NumberAnimation { duration: 120 } }
-            }
-            MouseArea { anchors.fill: parent; onClicked: sw.toggled() }
+            checked: sw.checked
+            onToggled: sw.toggled()
+        }
+    }
+
+    component SectionHeader: Item {
+        default property alias trailing: trail.data
+        property string text
+        width: parent ? parent.width : 0
+        implicitWidth: hdrLabel.implicitWidth + 24 + trail.childrenRect.width
+        implicitHeight: 22
+        SectionLabel { id: hdrLabel; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; topPadding: 0; bottomPadding: 0; text: parent.text }
+        Item { id: trail; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; width: childrenRect.width; height: childrenRect.height }
+    }
+
+    component Slider: Item {
+        id: sl
+        property real value: 0
+        signal moved(real v)
+        implicitHeight: 16
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: 4
+            radius: 2
+            color: root.track
+            Rectangle { width: knob.x + knob.width / 2; height: parent.height; radius: 2; color: root.accent }
+        }
+        Rectangle {
+            id: knob
+            x: (sl.width - width) * Math.max(0, Math.min(1, sl.value))
+            anchors.verticalCenter: parent.verticalCenter
+            width: 14
+            height: 14
+            radius: 7
+            color: slMa.containsMouse || slMa.pressed ? Qt.lighter(root.accent, 1.15) : root.accent
+        }
+        MouseArea {
+            id: slMa
+            anchors.fill: parent
+            hoverEnabled: true
+            function setFromX(x) { sl.moved(Math.max(0, Math.min(1, (x - knob.width / 2) / (width - knob.width)))); }
+            onPressed: mouse => setFromX(mouse.x)
+            onPositionChanged: mouse => { if (pressed) setFromX(mouse.x); }
         }
     }
 
@@ -756,17 +821,25 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         property string name
         property int count: 1
         property string value
+        property string unit
         property real frac: 0
         width: parent ? parent.width : 0
-        spacing: 5
-        bottomPadding: 4
+        spacing: 6
+        bottomPadding: 6
         Item {
             width: parent.width
             implicitWidth: procName.implicitWidth + procCount.implicitWidth + 40 + procValue.implicitWidth
             implicitHeight: 20
             Text { id: procName; anchors.verticalCenter: parent.verticalCenter; text: parent.parent.name; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 14; elide: Text.ElideRight; width: Math.min(implicitWidth, parent.width - procValue.width - procCount.implicitWidth - 16) }
             Text { id: procCount; anchors.left: procName.right; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; visible: parent.parent.count > 1; text: "\u00d7" + parent.parent.count; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12 }
-            Text { id: procValue; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: parent.parent.value; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14 }
+            Row {
+                id: procValue
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 7
+                Text { text: procValue.parent.parent.value; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14 }
+                Text { visible: text !== ""; text: procValue.parent.parent.unit; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 14 }
+            }
         }
         Meter { frac: parent.frac }
     }
@@ -779,6 +852,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         // only shows the button chrome on hover.
         property bool discrete: false
         readonly property int contentInset: 8 // horizontal padding around content
+        readonly property bool hovered: ma.containsMouse
         signal clicked()
         implicitHeight: 22
         height: implicitHeight
@@ -800,6 +874,51 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             anchors.fill: parent
             hoverEnabled: true
             onClicked: btn.clicked()
+        }
+    }
+
+    component TextButton: MenuButton {
+        id: tb
+        property string label
+        property string icon: ""
+        property bool external: false
+        property color textColor: root.textDefault
+        implicitHeight: 28
+        implicitWidth: tbRow.implicitWidth + 2 * contentInset + 8
+        width: implicitWidth
+        Row {
+            id: tbRow
+            anchors.centerIn: parent
+            spacing: 8
+            Text { visible: tb.icon !== ""; anchors.verticalCenter: parent.verticalCenter; text: tb.icon; color: tb.textColor; font.family: Theme.fontFamily; font.pixelSize: 13 }
+            Text { anchors.verticalCenter: parent.verticalCenter; text: tb.label; color: tb.textColor; font.family: Theme.fontFamily; font.pixelSize: 13 }
+            Text { visible: tb.external; anchors.verticalCenter: parent.verticalCenter; text: "\uf08e"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 11 }
+        }
+    }
+
+    component Footer: Column {
+        default property alias content: footRow.data
+        width: parent ? parent.width : 0
+        spacing: 14
+        topPadding: 6
+        Divider {}
+        Row { id: footRow; spacing: 8 }
+    }
+
+    component Card: Rectangle {
+        default property alias content: cardCol.data
+        width: parent ? parent.width : 0
+        implicitHeight: cardCol.implicitHeight + 2 * cardCol.y
+        radius: 2
+        color: Qt.rgba(1, 1, 1, 0.025)
+        border.width: 1
+        border.color: root.cardBorder
+        Column {
+            id: cardCol
+            x: 12
+            y: 12
+            width: parent.width - 24
+            spacing: 6
         }
     }
 
@@ -1125,10 +1244,11 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         }
 
         Rectangle {
-            width: parent.width
-            height: 24
-            radius: 3
-            color: rowHover.hovered || trow.expanded ? root.hoverBg : "transparent"
+            x: -8
+            width: parent.width + 16
+            height: 34
+            radius: 2
+            color: rowHover.hovered || trow.expanded ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
             // Widens the popup around the task text (see Dropdown.naturalWidth);
             // the deadline is a fixed column so its changing label can't.
             implicitWidth: 6 + box.implicitWidth + 8 + title.implicitWidth + 6 + root.todoNoteWidth
@@ -1145,15 +1265,26 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                 onClicked: root.todoExpandedId = trow.expanded ? "" : trow.modelData.id
             }
 
-            Text {
+            Rectangle {
                 id: box
                 anchors.left: parent.left
-                anchors.leftMargin: 6
+                anchors.leftMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                text: trow.modelData.done ? "\uf046" : "\uf096"
-                color: boxMa.containsMouse ? root.accent : (trow.modelData.done ? root.textFaint : root.textDim)
-                font.family: Theme.fontFamily
-                font.pixelSize: 14
+                implicitWidth: 15
+                width: 15
+                height: 15
+                radius: 2
+                color: trow.modelData.done ? root.accent : root.textBright
+                border.width: 1
+                border.color: boxMa.containsMouse ? root.accent : root.textDim
+                Text {
+                    anchors.centerIn: parent
+                    visible: trow.modelData.done
+                    text: "\uf00c"
+                    color: "#ffffff"
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 10
+                }
                 MouseArea {
                     id: boxMa
                     anchors.fill: parent
@@ -1166,15 +1297,15 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             Text {
                 id: title
                 anchors.left: box.right
-                anchors.leftMargin: 8
+                anchors.leftMargin: 12
                 anchors.right: note.left
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 text: trow.modelData.text
                 elide: Text.ElideRight
-                color: trow.modelData.done ? root.textFaint : root.textDefault
+                color: trow.modelData.done ? root.textFaint : root.textBright
                 font.family: Theme.fontFamily
-                font.pixelSize: 13
+                font.pixelSize: 14
                 font.strikeout: trow.modelData.done
             }
 
@@ -1191,23 +1322,40 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                 visible: trow.modelData.desc !== ""
                 color: trow.modelData.done ? root.textFaint : root.textDim
                 font.family: Theme.fontFamily
-                font.pixelSize: 11
+                font.pixelSize: 13
             }
 
-            Text {
+            Item {
                 id: dueText
+                readonly property bool late: !trow.modelData.done && trow.modelData.due !== "" && TodoStore.dueTone(trow.modelData.due, TodoStore.now) === "overdue"
                 width: root.todoDueWidth
+                height: 22
                 anchors.right: del.left
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
-                horizontalAlignment: Text.AlignRight
-                elide: Text.ElideRight
-                text: trow.modelData.due !== "" ? TodoStore.dueLabel(trow.modelData.due, TodoStore.now)
-                    : (rowHover.hovered ? "set due" : "\uf073")
-                color: trow.modelData.due !== "" ? root.todoDueColor(TodoStore.dueTone(trow.modelData.due, TodoStore.now), trow.modelData.done)
-                    : root.textFaint
-                font.family: Theme.fontFamily
-                font.pixelSize: 12
+                Rectangle {
+                    visible: dueText.late
+                    anchors.right: parent.right
+                    width: dueLabel.implicitWidth + 14
+                    height: parent.height
+                    radius: 2
+                    color: Qt.rgba(root.dueLate.r, root.dueLate.g, root.dueLate.b, 0.15)
+                }
+                Text {
+                    id: dueLabel
+                    anchors.right: parent.right
+                    anchors.rightMargin: dueText.late ? 7 : 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, parent.width)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    text: trow.modelData.due !== "" ? TodoStore.dueLabel(trow.modelData.due, TodoStore.now).replace(/ late$/, " overdue")
+                        : (rowHover.hovered ? "\uf073" : "")
+                    color: trow.modelData.due !== "" ? root.todoDueColor(TodoStore.dueTone(trow.modelData.due, TodoStore.now), trow.modelData.done)
+                        : root.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: trow.modelData.due !== "" ? 12 : 14
+                }
             }
 
             Text {
@@ -1573,59 +1721,121 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     barScreen: barWin.screen
                     hover: hsClock
                     align: "left"
-                    minWidth: 236
+                    minWidth: 340
+                    onVisibleChanged: if (!visible) root.calOffset = 0
 
-                    Row {
+                    Item {
                         width: parent.width
-                        Text {
-                            text: root.monthNames[root.now.getMonth()] + " " + root.now.getFullYear()
-                            color: root.textBright
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 13
+                        height: 30
+                        Row {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 8
+                            Text { text: root.monthNames[root.calShown.getMonth()]; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 16; font.weight: Font.DemiBold }
+                            Text { text: root.calShown.getFullYear(); color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 16 }
                         }
-                        Item { width: parent.width - 140; height: 1 }
-                        Text {
-                            text: "w" + root.isoWeek(root.now)
-                            color: root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                        Row {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            Repeater {
+                                model: [{ t: "‹", d: -1 }, { t: "›", d: 1 }]
+                                delegate: MenuButton {
+                                    required property var modelData
+                                    width: 26
+                                    implicitHeight: 26
+                                    discrete: true
+                                    onClicked: root.calOffset += modelData.d
+                                    Text { anchors.centerIn: parent; text: modelData.t; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 18 }
+                                }
+                            }
                         }
                     }
 
-                    Grid {
-                        columns: 7
-                        spacing: 2
+                    Column {
+                        id: calGrid
                         width: parent.width
+                        spacing: 4
+                        readonly property real cellW: (width - 7 * 8) / 8
 
-                        Repeater {
-                            model: ["m", "t", "w", "t", "f", "s", "s"]
-                            delegate: Text {
-                                required property string modelData
-                                text: modelData
-                                width: (parent.width - 12) / 7
-                                height: 24
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                color: root.textFaint
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                        Row {
+                            spacing: 8
+                            Repeater {
+                                model: ["WK", "M", "T", "W", "T", "F", "S", "S"]
+                                delegate: Text {
+                                    required property string modelData
+                                    required property int index
+                                    width: calGrid.cellW
+                                    height: 26
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: modelData
+                                    color: index === 0 ? root.textDimmer : (index >= 6 ? root.textDimmer : root.textDim)
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: index === 0 ? 11 : 12
+                                    font.weight: Font.DemiBold
+                                }
                             }
                         }
 
                         Repeater {
-                            model: root.calendarCells(root.now)
-                            delegate: Rectangle {
+                            model: root.calendarWeeks(root.calShown, root.now)
+                            delegate: Row {
+                                id: calWeek
                                 required property var modelData
-                                width: (parent.width - 12) / 7
-                                height: 24
-                                color: modelData.today ? root.accent : "transparent"
+                                spacing: 8
                                 Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.t
-                                    color: modelData.today ? "#ffffff" : root.textDim
+                                    width: calGrid.cellW
+                                    height: 30
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: calWeek.modelData.wk
+                                    color: calWeek.modelData.current ? root.accent : root.textDimmer
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 12
+                                    font.pixelSize: 11
                                 }
+                                Repeater {
+                                    model: calWeek.modelData.days
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: calGrid.cellW
+                                        height: 30
+                                        radius: 2
+                                        color: modelData.today ? root.accent : (calWeek.modelData.current ? Qt.rgba(1, 1, 1, 0.04) : "transparent")
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.t
+                                            color: modelData.today ? "#ffffff" : modelData.out ? root.textFaint : modelData.weekend ? root.textDim : root.textBright
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 13
+                                            font.weight: modelData.today ? Font.Bold : Font.Normal
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Footer {
+                        id: calFooter
+                        Item {
+                            width: calFooter.width
+                            height: 28
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.dayNames[root.now.getDay()] + ", " + root.now.getDate() + " " + root.monthNames[root.now.getMonth()]
+                                color: root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            TextButton {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                label: "Today"
+                                onClicked: root.calOffset = 0
                             }
                         }
                     }
@@ -1663,31 +1873,30 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
 
                     Timer { id: composerFocusTimer; interval: 40; onTriggered: newTaskInput.forceActiveFocus() }
 
-                    Item {
-                        width: parent.width
-                        height: 16
-
-                        SectionLabel {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "TODO"
-                        }
-                        Text {
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: {
-                                if (TodoStore.openCount === 0)
-                                    return TodoStore.tasks.length === 0 ? "" : "all done";
-                                let s = TodoStore.openCount + " open";
-                                if (TodoStore.overdueCount > 0)
-                                    s += " · " + TodoStore.overdueCount + " late";
-                                else if (TodoStore.dueTodayCount > 0)
-                                    s += " · " + TodoStore.dueTodayCount + " today";
-                                return s;
+                    SectionHeader {
+                        text: "TODO"
+                        Row {
+                            spacing: 0
+                            Text {
+                                text: TodoStore.openCount === 0 ? (TodoStore.tasks.length === 0 ? "" : "all done") : TodoStore.openCount + " open"
+                                color: root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
                             }
-                            color: TodoStore.overdueCount > 0 ? root.dueLate : root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
+                            Text {
+                                visible: TodoStore.openCount > 0 && (TodoStore.overdueCount > 0 || TodoStore.dueTodayCount > 0)
+                                text: " · "
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                visible: TodoStore.openCount > 0 && (TodoStore.overdueCount > 0 || TodoStore.dueTodayCount > 0)
+                                text: TodoStore.overdueCount > 0 ? TodoStore.overdueCount + " overdue" : TodoStore.dueTodayCount + " today"
+                                color: TodoStore.overdueCount > 0 ? root.dueLate : root.dueSoon
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
                         }
                     }
 
@@ -1732,33 +1941,28 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                         delegate: TodoRow {}
                     }
 
-                    Item { width: parent.width; height: 4 }
-
-                    Rectangle {
-                        width: parent.width
-                        height: 1
-                        color: root.hairline
-                    }
+                    Item { width: parent.width; height: 2 }
+                    Divider {}
 
                     Row {
                         id: composer
                         width: parent.width
-                        spacing: 6
-                        topPadding: 4
+                        spacing: 8
+                        topPadding: 8
 
                         Rectangle {
                             width: composer.width - addBtn.width - composer.spacing
-                            height: 24
-                            radius: 3
-                            color: "transparent"
+                            height: 32
+                            radius: 2
+                            color: root.bg
                             border.width: 1
-                            border.color: newTaskInput.activeFocus ? root.accent : root.hairline
+                            border.color: newTaskInput.activeFocus ? root.accent : root.cardBorder
 
                             TextInput {
                                 id: newTaskInput
                                 anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
                                 verticalAlignment: TextInput.AlignVCenter
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
@@ -1776,7 +1980,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 anchors.left: parent.left
                                 anchors.leftMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: "new task"
+                                text: "Add a task..."
                                 color: root.textFaint
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 13
@@ -1784,10 +1988,15 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             }
                         }
 
-                        MenuButton {
+                        TextButton {
                             id: addBtn
-                            width: 44
-                            implicitHeight: 24
+                            implicitHeight: 32
+                            width: 80
+                            icon: "+"
+                            label: "Add"
+                            textColor: "#ffffff"
+                            color: hovered ? Qt.lighter(root.accent, 1.15) : root.accent
+                            border.color: "transparent"
                             onClicked: {
                                 if (newTaskInput.text.trim() === "") {
                                     newTaskInput.forceActiveFocus();
@@ -1799,7 +2008,6 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 newDue.clear();
                                 newTaskInput.forceActiveFocus();
                             }
-                            Text { anchors.centerIn: parent; text: "add"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
                         }
                     }
 
@@ -2017,14 +2225,36 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     align: "center"
                     minWidth: 340
 
-                    SectionLabel { text: "MEMORY BY PROCESS" }
+                    SectionLabel { text: "MEMORY" }
+                    Row {
+                        spacing: 10
+                        bottomPadding: 10
+                        Text {
+                            id: bigRam
+                            text: root.ramGiB.toFixed(1)
+                            color: root.textBright
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 30
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            anchors.baseline: bigRam.baseline
+                            text: "GiB used"
+                            color: root.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                        }
+                    }
+                    Divider {}
+                    SectionLabel { text: "BY PROCESS"; topPadding: 8 }
                     Repeater {
                         model: root.topRamList
                         delegate: ProcRow {
                             required property var modelData
                             name: modelData.name
                             count: modelData.count
-                            value: modelData.v
+                            value: modelData.num
+                            unit: modelData.unit
                             frac: modelData.mib / root.topRamMax
                         }
                     }
@@ -2202,14 +2432,32 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     align: "right"
                     minWidth: 300
 
-                    SectionLabel { text: "VPN INTERFACES" }
+                    SectionLabel { text: "VPN" }
                     Repeater {
                         model: root.vpnEntries
-                        delegate: Row {
+                        delegate: Item {
+                            id: vpnItem
                             required property var modelData
                             width: parent.width
-                            Text { text: modelData.iface; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width * 0.4 }
-                            Text { text: modelData.detail; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width * 0.6; horizontalAlignment: Text.AlignRight }
+                            implicitWidth: 18 + Math.max(vpnName.implicitWidth, vpnIp.implicitWidth) + 24 + 28
+                            implicitHeight: 42
+                            Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: root.ok }
+                            Column {
+                                x: 18
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                Text { id: vpnName; text: vpnItem.modelData.iface; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
+                                Text { id: vpnIp; text: vpnItem.modelData.detail; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                            }
+                            MenuButton {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 28
+                                implicitHeight: 28
+                                discrete: true
+                                onClicked: Quickshell.execDetached(["wl-copy", vpnItem.modelData.detail])
+                                Text { anchors.centerIn: parent; text: ""; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                            }
                         }
                     }
                     Text {
@@ -2244,115 +2492,113 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     }
                     readonly property int appNameColWidth: Math.min(Math.ceil(appNameMetrics.advanceWidth) + 1, 240)
 
+                    readonly property var sinkAudio: Pipewire.defaultAudioSink ? Pipewire.defaultAudioSink.audio : null
+                    readonly property bool muted: sinkAudio !== null && sinkAudio.muted
+
+                    SectionHeader {
+                        text: "OUTPUT"
+                        Text {
+                            text: volDropdown.muted ? "muted" : root.volumePct() + "%"
+                            color: volDropdown.muted ? root.accent : root.textBright
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 14
+                        }
+                    }
+
                     Item {
                         width: parent.width
-                        height: 22
-                        Text {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "OUTPUT"; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12; font.letterSpacing: 1
-                        }
+                        height: 32
                         MenuButton {
+                            id: muteBtn
+                            anchors.left: parent.left
+                            anchors.leftMargin: -6
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 30
+                            implicitHeight: 28
+                            discrete: true
+                            onClicked: if (volDropdown.sinkAudio) volDropdown.sinkAudio.muted = !volDropdown.sinkAudio.muted
+                            Text {
+                                anchors.centerIn: parent
+                                text: volDropdown.muted ? "" : ""
+                                color: volDropdown.muted ? root.accent : root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 15
+                            }
+                        }
+                        Slider {
+                            anchors.left: muteBtn.right
+                            anchors.leftMargin: 10
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            width: muteText.implicitWidth + 16
-                            onClicked: if (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio)
-                                Pipewire.defaultAudioSink.audio.muted = !Pipewire.defaultAudioSink.audio.muted
-                            Text {
-                                id: muteText
-                                anchors.centerIn: parent
-                                text: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? "MUTED" : "MUTE"
-                                color: (Pipewire.defaultAudioSink && Pipewire.defaultAudioSink.audio && Pipewire.defaultAudioSink.audio.muted) ? root.accent : root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
+                            value: root.volumePct() / 100
+                            onMoved: v => {
+                                if (!volDropdown.sinkAudio) return;
+                                volDropdown.sinkAudio.volume = v;
+                                volDropdown.sinkAudio.muted = false;
                             }
                         }
                     }
 
-                    Item {
-                        width: parent.width
-                        height: 18
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: height / 2
-                            color: "#161a1f"
-                            border.width: 1
-                            border.color: volMa.containsMouse ? root.accent : root.hairline
-                        }
-
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            radius: height / 2
-                            width: Math.max(height, parent.width * root.volumePct() / 100)
-                            color: volMa.containsMouse ? Qt.lighter(root.accent, 1.15) : root.accent
-                        }
-
-                        MouseArea {
-                            id: volMa
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            function setFromX(x) {
-                                if (!Pipewire.defaultAudioSink || !Pipewire.defaultAudioSink.audio) return;
-                                const pct = Math.max(0, Math.min(1, x / width));
-                                Pipewire.defaultAudioSink.audio.volume = pct;
-                                Pipewire.defaultAudioSink.audio.muted = false;
-                            }
-                            onPressed: mouse => setFromX(mouse.x)
-                            onPositionChanged: mouse => { if (pressed) setFromX(mouse.x); }
-                        }
-                    }
-
-                    SectionLabel { text: "OUTPUT DEVICE"; topPadding: 4 }
+                    SectionLabel { text: "DEVICE"; topPadding: 8 }
                     Repeater {
                         model: Pipewire.nodes.values.filter(n => n.isSink && !n.isStream)
                         delegate: MenuButton {
+                            id: sinkRow
                             required property var modelData
-                            width: parent.width
-                            // Full device name + status column: the popup widens to fit.
-                            implicitWidth: sinkName.implicitWidth + 8 + activeLabel.width + 2 * contentInset
+                            readonly property bool active: modelData === Pipewire.defaultAudioSink
+                            x: -8
+                            width: parent.width + 16
+                            implicitHeight: 36
+                            implicitWidth: 30 + sinkName.implicitWidth + 8 + 20 + 2 * contentInset
                             discrete: true
                             onClicked: Pipewire.preferredDefaultAudioSink = modelData
                             Text {
-                                id: sinkName
+                                id: sinkIcon
+                                width: 20
                                 anchors.left: parent.left
-                                anchors.right: activeLabel.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: sinkRow.modelData.name.startsWith("bluez") ? "" : ""
+                                color: root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 15
+                            }
+                            Text {
+                                id: sinkName
+                                anchors.left: sinkIcon.right
+                                anchors.leftMargin: 10
+                                anchors.right: sinkCheck.left
                                 anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.description || modelData.name
-                                color: modelData === Pipewire.defaultAudioSink ? root.textBright : root.textDefault
+                                text: sinkRow.modelData.description || sinkRow.modelData.name
+                                color: sinkRow.active ? root.textBright : root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 13
+                                font.pixelSize: 14
                                 elide: Text.ElideRight
                             }
                             Text {
-                                id: activeLabel
+                                id: sinkCheck
+                                width: 20
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData === Pipewire.defaultAudioSink ? "ACTIVE" : ""
+                                horizontalAlignment: Text.AlignHCenter
+                                text: sinkRow.active ? "" : ""
                                 color: root.accent
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                                width: 60
-                                horizontalAlignment: Text.AlignRight
+                                font.pixelSize: 13
                             }
                         }
                     }
 
-                    SectionLabel { text: "APPLICATIONS"; topPadding: 8 }
+                    SectionLabel { text: "APPLICATIONS"; topPadding: 8; visible: volDropdown.appStreams.length > 0 }
                     Repeater {
                         model: volDropdown.appStreams
                         delegate: Item {
                             id: appRow
                             required property var modelData
-                            x: 8
-                            width: parent.width - 16
-                            height: appName.implicitHeight
-                            // Name column + room for a usable slider; the % column is
-                            // fixed-width so a changing volume can't resize the popup.
-                            implicitWidth: 16 + volDropdown.appNameColWidth + 8 + 80 + 8 + appPct.width
+                            width: parent.width
+                            height: 30
+                            implicitWidth: volDropdown.appNameColWidth + 12 + 100 + 12 + appPct.width
                             Text {
                                 id: appName
                                 anchors.left: parent.left
@@ -2361,165 +2607,188 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 text: volDropdown.appName(appRow.modelData)
                                 color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 13
+                                font.pixelSize: 14
                                 elide: Text.ElideRight
                             }
-                            Item {
+                            Slider {
                                 anchors.left: appName.right
-                                anchors.leftMargin: 8
+                                anchors.leftMargin: 12
                                 anchors.right: appPct.left
-                                anchors.rightMargin: 8
-                                height: 10
+                                anchors.rightMargin: 12
                                 anchors.verticalCenter: parent.verticalCenter
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: height / 2
-                                    color: "#161a1f"
-                                    border.width: 1
-                                    border.color: appVolMa.containsMouse ? root.accent : root.hairline
-                                }
-
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.top: parent.top
-                                    anchors.bottom: parent.bottom
-                                    radius: height / 2
-                                    width: Math.max(height, parent.width * modelData.audio.volume)
-                                    color: appVolMa.containsMouse ? Qt.lighter(root.accent, 1.15) : root.accent
-                                }
-
-                                MouseArea {
-                                    id: appVolMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    function setFromX(x) {
-                                        modelData.audio.volume = Math.max(0, Math.min(1, x / width));
-                                    }
-                                    onPressed: mouse => setFromX(mouse.x)
-                                    onPositionChanged: mouse => { if (pressed) setFromX(mouse.x); }
-                                }
+                                value: appRow.modelData.audio.volume
+                                onMoved: v => appRow.modelData.audio.volume = v
                             }
                             Text {
                                 id: appPct
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: Math.round(modelData.audio.volume * 100) + "%"
+                                text: Math.round(appRow.modelData.audio.volume * 100) + "%"
                                 color: root.textDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: 13
-                                width: 34
+                                width: 40
                                 horizontalAlignment: Text.AlignRight
                             }
                         }
                     }
 
-                    Item { width: 1; height: 4 }
-                    MenuButton {
-                        width: pavuText.implicitWidth + 16
-                        onClicked: Quickshell.execDetached(["pavucontrol"])
-                        Text {
-                            id: pavuText
-                            anchors.centerIn: parent
-                            text: "pavucontrol"
-                            color: root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
-                        }
+                    Footer {
+                        TextButton { label: "pavucontrol"; external: true; onClicked: Quickshell.execDetached(["pavucontrol"]) }
                     }
                 }
 
                 Dropdown {
                     barScreen: barWin.screen
+                    id: btDropdown
                     hover: hsBt
                     align: "right"
-                    minWidth: 248
+                    minWidth: 330
 
-                    MenuButton {
-                        width: parent.width
-                        onClicked: if (Bluetooth.defaultAdapter)
-                            Bluetooth.defaultAdapter.enabled = !Bluetooth.defaultAdapter.enabled
-                        Text {
-                            anchors.left: parent.left
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "BLUETOOTH · " + (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.enabled ? "ON" : "OFF")
-                            color: root.textDimmer
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 12
-                            font.letterSpacing: 1
+                    readonly property var adapter: Bluetooth.defaultAdapter
+                    function btIcon(d) {
+                        const i = d.icon || "";
+                        if (i.includes("keyboard")) return "";
+                        if (i.includes("mouse")) return "󰍽";
+                        if (i.includes("headset") || i.includes("headphone")) return "";
+                        if (i.startsWith("audio")) return "󰓃";
+                        if (i.includes("phone")) return "";
+                        return "";
+                    }
+
+                    SectionHeader {
+                        text: "BLUETOOTH"
+                        Toggle {
+                            checked: btDropdown.adapter !== null && btDropdown.adapter.enabled
+                            onToggled: if (btDropdown.adapter) btDropdown.adapter.enabled = !btDropdown.adapter.enabled
                         }
                     }
+
                     Repeater {
-                        model: Bluetooth.devices.values.filter(d => d.paired || d.connected)
-                        delegate: MenuButton {
+                        model: Bluetooth.devices.values.filter(d => d.connected)
+                        delegate: Card {
+                            id: btCard
                             required property var modelData
-                            width: parent.width
-                            // Full device name + status column: the popup widens to fit.
-                            implicitWidth: btName.implicitWidth + 8 + statusLabel.width + 2 * contentInset
+                            implicitWidth: 24 + 34 + btCardName.implicitWidth + 16 + btDisc.implicitWidth
+                            Item {
+                                width: parent.width
+                                height: 40
+                                Text {
+                                    width: 24
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: btDropdown.btIcon(btCard.modelData)
+                                    color: root.accent
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 17
+                                }
+                                Column {
+                                    x: 34
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - x - btDisc.width - 12
+                                    spacing: 2
+                                    Text { id: btCardName; width: parent.width; elide: Text.ElideRight; text: btCard.modelData.name || btCard.modelData.deviceName; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
+                                    Text { text: btCard.modelData.batteryAvailable ? "Connected · " + Math.round(btCard.modelData.battery * 100) + "%" : "Connected"; color: root.ok; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                                }
+                                TextButton {
+                                    id: btDisc
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    label: "Disconnect"
+                                    onClicked: btCard.modelData.disconnect()
+                                }
+                            }
+                        }
+                    }
+
+                    SectionLabel { text: "PAIRED"; topPadding: 8; visible: btPaired.count > 0 }
+                    Repeater {
+                        id: btPaired
+                        model: Bluetooth.devices.values.filter(d => d.paired && !d.connected)
+                        delegate: MenuButton {
+                            id: btRow
+                            required property var modelData
+                            readonly property bool busy: modelData.state === BluetoothDeviceState.Connecting
+                            x: -8
+                            width: parent.width + 16
+                            implicitHeight: 36
+                            implicitWidth: 34 + btName.implicitWidth + 12 + btAction.implicitWidth + 2 * contentInset
                             discrete: true
-                            onClicked: modelData.connected ? modelData.disconnect() : modelData.connect()
+                            color: hovered ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+                            border.color: "transparent"
+                            onClicked: modelData.connect()
+                            Text {
+                                id: btIconText
+                                width: 24
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: btDropdown.btIcon(btRow.modelData)
+                                color: root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 16
+                            }
                             Text {
                                 id: btName
-                                anchors.left: parent.left
-                                anchors.right: statusLabel.left
-                                anchors.rightMargin: 8
+                                anchors.left: btIconText.right
+                                anchors.leftMargin: 10
+                                anchors.right: btAction.left
+                                anchors.rightMargin: 12
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.name || modelData.deviceName
-                                color: modelData.connected ? root.textBright : root.textDefault
+                                text: btRow.modelData.name || btRow.modelData.deviceName
+                                color: root.textDefault
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 13
+                                font.pixelSize: 14
                                 elide: Text.ElideRight
                             }
                             Text {
-                                id: statusLabel
+                                id: btAction
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.connected ? "CONNECTED" : "PAIRED"
-                                color: modelData.connected ? root.accent : root.textDimmer
+                                visible: btRow.hovered || btRow.busy
+                                text: btRow.busy ? "Connecting…" : "Connect"
+                                color: root.textDim
                                 font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                                width: 90
-                                horizontalAlignment: Text.AlignRight
+                                font.pixelSize: 13
                             }
                         }
                     }
-                    Item { width: 1; height: 4 }
-                    Row {
-                        spacing: 8
-                        MenuButton {
-                            width: btctlText.implicitWidth + 16
-                            onClicked: Quickshell.execDetached([root.repoScripts + "/qs-bluetooth"])
-                            Text {
-                                id: btctlText
-                                anchors.centerIn: parent
-                                text: "qs-bluetooth"
-                                color: root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                            }
+
+                    Footer {
+                        TextButton {
+                            readonly property bool scanning: btDropdown.adapter !== null && btDropdown.adapter.discovering
+                            icon: ""
+                            label: scanning ? "Scanning…" : "Scan"
+                            enabled: !scanning
+                            onClicked: if (btDropdown.adapter) btDropdown.adapter.discovering = true
                         }
-                        MenuButton {
-                            width: btScanText.implicitWidth + 16
-                            enabled: !(Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.discovering)
-                            onClicked: if (Bluetooth.defaultAdapter) Bluetooth.defaultAdapter.discovering = true
-                            Text {
-                                id: btScanText
-                                anchors.centerIn: parent
-                                text: (Bluetooth.defaultAdapter && Bluetooth.defaultAdapter.discovering) ? "scanning…" : "scan"
-                                color: root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                            }
-                        }
+                        TextButton { label: "qs-bluetooth"; external: true; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-bluetooth"]) }
                     }
                 }
 
                 Dropdown {
                     barScreen: barWin.screen
+                    id: netDropdown
                     hover: hsNet
                     align: "right"
-                    minWidth: 380
+                    minWidth: 340
                     wantsKeyboard: root.wifiExpandedSsid !== "" && root.wifiExpandedNeedsPassword
+
+                    function signalIcon(s) {
+                        const n = Number(s);
+                        return n >= 75 ? "󰤨" : n >= 50 ? "󰤥" : n >= 25 ? "󰤢" : "󰤟";
+                    }
+                    function securityLabel(sec) {
+                        if (sec.includes("802.1X")) return "802.1X";
+                        if (sec.includes("WPA3")) return "WPA3";
+                        if (sec.includes("WPA2")) return "WPA2";
+                        if (sec.includes("WPA")) return "WPA";
+                        if (sec.includes("WEP")) return "WEP";
+                        return "Open";
+                    }
+                    readonly property var activeWifi: root.netWifiList.find(w => w.active) || null
+                    readonly property var activeDev: activeWifi ? (root.netWifiDevList.find(d => d.conn === activeWifi.ssid) || root.netWifiDevList[0] || null) : null
 
                     Repeater {
                         model: root.netWiredList
@@ -2528,6 +2797,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             required property int index
                             width: parent.width
                             spacing: 4
+                            bottomPadding: 6
                             SectionLabel { text: "WIRED · " + modelData.dev; topPadding: index > 0 ? 6 : 0 }
                             Repeater {
                                 model: modelData.addrs
@@ -2535,7 +2805,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                     required property var modelData
                                     width: parent.width
                                     Text { text: modelData.kind; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 150 }
-                                    Text { text: modelData.cidr; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 150; horizontalAlignment: Text.AlignRight }
+                                    Text { text: modelData.cidr; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: 150; horizontalAlignment: Text.AlignRight }
                                 }
                             }
                             Text {
@@ -2548,117 +2818,174 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             Row {
                                 width: parent.width
                                 Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
-                                Text { text: modelData.gw; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                                Text { text: modelData.gw; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
                             }
                         }
                     }
 
-                    SectionLabel { text: "WI-FI"; topPadding: 6 }
+                    SectionHeader {
+                        text: "WI-FI"
+                        Toggle {
+                            checked: root.wifiRadio
+                            onToggled: {
+                                root.wifiRadio = !root.wifiRadio;
+                                Quickshell.execDetached(["nmcli", "radio", "wifi", root.wifiRadio ? "on" : "off"]);
+                                wifiRefreshTimer.restart();
+                            }
+                        }
+                    }
                     Timer { id: wifiRefreshTimer; interval: 2500; onTriggered: netProc.running = true }
+
+                    Card {
+                        visible: netDropdown.activeWifi !== null
+                        implicitWidth: 24 + 34 + activeSsid.implicitWidth + 16 + 80
+                        Item {
+                            width: parent.width
+                            height: 26
+                            Text {
+                                width: 24
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                horizontalAlignment: Text.AlignHCenter
+                                text: netDropdown.activeWifi ? netDropdown.signalIcon(netDropdown.activeWifi.signal) : ""
+                                color: root.accent
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 17
+                            }
+                            Text {
+                                id: activeSsid
+                                x: 34
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - x - activeState.width - 12
+                                elide: Text.ElideRight
+                                text: netDropdown.activeWifi ? netDropdown.activeWifi.ssid : ""
+                                color: root.textBright
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                id: activeState
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "Connected"
+                                color: root.ok
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                        }
+                        Column {
+                            x: 34
+                            width: parent.width - 34
+                            spacing: 4
+                            topPadding: 2
+                            bottomPadding: 4
+                            Repeater {
+                                model: netDropdown.activeDev ? [
+                                    ["IPv4", netDropdown.activeDev.ip4],
+                                    ["Gateway", netDropdown.activeDev.gw],
+                                    ["Interface", netDropdown.activeDev.dev]
+                                ] : []
+                                delegate: Row {
+                                    required property var modelData
+                                    Text { width: 90; text: modelData[0]; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                                    Text { text: modelData[1]; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                                }
+                            }
+                        }
+                        Row {
+                            x: 34
+                            spacing: 8
+                            bottomPadding: 2
+                            TextButton {
+                                label: "Disconnect"
+                                onClicked: {
+                                    Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--disconnect"]);
+                                    wifiRefreshTimer.restart();
+                                }
+                            }
+                            TextButton {
+                                label: "Forget"
+                                visible: netDropdown.activeWifi !== null && netDropdown.activeWifi.saved
+                                onClicked: {
+                                    Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", netDropdown.activeWifi.ssid]);
+                                    wifiRefreshTimer.restart();
+                                }
+                            }
+                        }
+                    }
+
+                    SectionLabel { text: "AVAILABLE"; topPadding: 8; visible: root.wifiRadio && root.netWifiList.some(w => !w.active) }
                     Repeater {
-                        model: root.netWifiList
+                        model: root.wifiRadio ? root.netWifiList.filter(w => !w.active) : []
                         delegate: Column {
                             id: wifiRow
                             required property var modelData
                             readonly property bool expanded: root.wifiExpandedSsid === modelData.ssid
-                            // Interface details for the connected network: match the NM
-                            // connection name to the SSID, fall back to the first wifi device.
-                            readonly property var devInfo: modelData.active
-                                ? (root.netWifiDevList.find(d => d.conn === modelData.ssid) || root.netWifiDevList[0] || null)
-                                : null
+                            readonly property string sec: netDropdown.securityLabel(modelData.security)
                             width: parent.width
                             spacing: 0
 
                             MenuButton {
-                                width: parent.width
-                                // Full SSID + status columns: the popup widens to fit.
-                                implicitWidth: ssidText.implicitWidth + 8 + securityLabel.width + signalLabel.width + 2 * contentInset
+                                id: wifiBtn
+                                x: -8
+                                width: parent.width + 16
+                                implicitHeight: 36
+                                implicitWidth: 34 + ssidText.implicitWidth + 12 + secText.width + 8 + 16 + 2 * contentInset
                                 discrete: true
-                                // The connected network's actions are always shown below it,
-                                // so its row is a plain label: no hover chrome, no click.
-                                enabled: !modelData.active
-                                opacity: 1
+                                color: hovered || wifiRow.expanded ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
+                                border.color: "transparent"
                                 onClicked: {
-                                    root.wifiExpandedSsid = wifiRow.expanded ? "" : modelData.ssid;
-                                    root.wifiExpandedNeedsPassword = !modelData.saved;
+                                    root.wifiExpandedSsid = wifiRow.expanded ? "" : wifiRow.modelData.ssid;
+                                    root.wifiExpandedNeedsPassword = !wifiRow.modelData.saved && wifiRow.sec !== "Open";
                                     root.wifiShowPassword = false;
                                 }
                                 Text {
-                                    id: ssidText
+                                    id: sigIcon
+                                    width: 24
                                     anchors.left: parent.left
-                                    anchors.right: securityLabel.left
-                                    anchors.rightMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: (modelData.active ? "● " : "") + modelData.ssid
-                                    color: modelData.active ? root.accent : root.textDefault
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: netDropdown.signalIcon(wifiRow.modelData.signal)
+                                    color: Number(wifiRow.modelData.signal) >= 25 ? root.textDefault : root.textDimmer
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 13
+                                    font.pixelSize: 16
+                                }
+                                Text {
+                                    id: ssidText
+                                    anchors.left: sigIcon.right
+                                    anchors.leftMargin: 10
+                                    anchors.right: secText.left
+                                    anchors.rightMargin: 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: wifiRow.modelData.ssid
+                                    color: root.textDefault
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 14
                                     elide: Text.ElideRight
                                 }
                                 Text {
-                                    id: securityLabel
-                                    anchors.right: signalLabel.left
+                                    id: secText
+                                    width: 52
+                                    anchors.right: lockIcon.left
+                                    anchors.rightMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.active ? "connected" : modelData.security
-                                    color: modelData.active ? root.accent : root.textDimmer
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 11
-                                    width: 62
                                     horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    id: signalLabel
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.signal + "%"
-                                    color: root.textFaint
+                                    text: wifiRow.sec
+                                    color: root.textDim
                                     font.family: Theme.fontFamily
                                     font.pixelSize: 12
-                                    width: 40
-                                    horizontalAlignment: Text.AlignRight
                                 }
-                            }
-
-                            Column {
-                                width: parent.width
-                                visible: wifiRow.devInfo !== null
-                                spacing: 4
-                                topPadding: 2
-                                bottomPadding: 4
-                                // Match MenuButton's 8px content inset on the right so the
-                                // values line up with the signal column; indent deeper on
-                                // the left to read as nested under the connection row.
-                                leftPadding: 16
-                                rightPadding: 8
-                                Row {
-                                    width: parent.width - parent.leftPadding - parent.rightPadding
-                                    Text { text: "ipv4 · " + (wifiRow.devInfo ? wifiRow.devInfo.dev : ""); color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 140 }
-                                    Text { text: wifiRow.devInfo ? wifiRow.devInfo.ip4 : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 140; horizontalAlignment: Text.AlignRight }
-                                }
-                                Row {
-                                    width: parent.width - parent.leftPadding - parent.rightPadding
-                                    Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 140 }
-                                    Text { text: wifiRow.devInfo ? wifiRow.devInfo.gw : ""; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 140; horizontalAlignment: Text.AlignRight }
-                                }
-                                Row {
-                                    spacing: 6
-                                    MenuButton {
-                                        width: 72
-                                        onClicked: {
-                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--disconnect"]);
-                                            wifiRefreshTimer.restart();
-                                        }
-                                        Text { anchors.centerIn: parent; text: "disconnect"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
-                                    }
-                                    MenuButton {
-                                        width: 56
-                                        visible: modelData.saved
-                                        onClicked: {
-                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", modelData.ssid]);
-                                            wifiRefreshTimer.restart();
-                                        }
-                                        Text { anchors.centerIn: parent; text: "forget"; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 12 }
-                                    }
+                                Text {
+                                    id: lockIcon
+                                    width: 16
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: wifiRow.sec === "Open" ? "" : ""
+                                    color: root.textDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 12
                                 }
                             }
 
@@ -2666,24 +2993,25 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 width: parent.width
                                 visible: wifiRow.expanded
                                 topPadding: 4
-                                bottomPadding: 6
-                                spacing: 6
-                                onVisibleChanged: if (visible && !modelData.saved) pwInput.forceActiveFocus()
+                                bottomPadding: 8
+                                leftPadding: 34
+                                spacing: 8
+                                onVisibleChanged: if (visible && root.wifiExpandedNeedsPassword) pwInput.forceActiveFocus()
 
                                 Rectangle {
-                                    width: parent.width
-                                    height: 24
-                                    radius: 3
-                                    visible: !modelData.saved
-                                    color: "transparent"
+                                    width: parent.width - parent.leftPadding
+                                    height: 30
+                                    radius: 2
+                                    visible: root.wifiExpandedNeedsPassword
+                                    color: root.bg
                                     border.width: 1
-                                    border.color: pwInput.activeFocus ? root.accent : root.hairline
+                                    border.color: pwInput.activeFocus ? root.accent : root.cardBorder
 
                                     TextInput {
                                         id: pwInput
                                         anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
                                         verticalAlignment: TextInput.AlignVCenter
                                         color: root.textDefault
                                         font.family: Theme.fontFamily
@@ -2696,9 +3024,9 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                     }
                                     Text {
                                         anchors.left: parent.left
-                                        anchors.leftMargin: 8
+                                        anchors.leftMargin: 10
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: "password"
+                                        text: "Password"
                                         color: root.textFaint
                                         font.family: Theme.fontFamily
                                         font.pixelSize: 13
@@ -2707,109 +3035,69 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 }
 
                                 Row {
-                                    width: parent.width
-                                    spacing: 6
+                                    spacing: 8
 
-                                    MenuButton {
-                                        width: 44
-                                        discrete: true
-                                        visible: !modelData.saved
-                                        onClicked: root.wifiShowPassword = !root.wifiShowPassword
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: root.wifiShowPassword ? "hide" : "show"
-                                            color: root.textDimmer
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: 12
-                                        }
-                                    }
-                                    MenuButton {
+                                    TextButton {
                                         id: connectBtn
-                                        width: 72
+                                        label: "Connect"
                                         onClicked: {
-                                            if (modelData.active) {
-                                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--disconnect"]);
-                                            } else {
-                                                Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--connect", modelData.ssid, pwInput.text]);
-                                            }
+                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--connect", wifiRow.modelData.ssid, pwInput.text]);
                                             root.wifiExpandedSsid = "";
                                             wifiRefreshTimer.restart();
-                                        }
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData.active ? "disconnect" : "connect"
-                                            color: root.textDefault
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: 12
                                         }
                                     }
-                                    MenuButton {
-                                        width: 56
-                                        visible: modelData.saved
+                                    TextButton {
+                                        visible: root.wifiExpandedNeedsPassword
+                                        discrete: true
+                                        label: root.wifiShowPassword ? "Hide" : "Show"
+                                        textColor: root.textDim
+                                        onClicked: root.wifiShowPassword = !root.wifiShowPassword
+                                    }
+                                    TextButton {
+                                        visible: wifiRow.modelData.saved
+                                        label: "Forget"
                                         onClicked: {
-                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", modelData.ssid]);
+                                            Quickshell.execDetached([root.repoScripts + "/qs-wifi", "--forget", wifiRow.modelData.ssid]);
                                             root.wifiExpandedSsid = "";
                                             wifiRefreshTimer.restart();
-                                        }
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "forget"
-                                            color: root.textDefault
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: 12
                                         }
                                     }
                                 }
                             }
                         }
                     }
+
+                    Item { width: 1; height: 2 }
+                    Divider {}
+
+                    SectionLabel { text: "VPN"; topPadding: 8; visible: root.netVpnList.length > 0 }
                     Repeater {
                         model: root.netVpnList
                         delegate: Column {
                             required property var modelData
                             width: parent.width
                             spacing: 4
-                            SectionLabel { text: "VPN · " + modelData.dev; topPadding: 6 }
-                            Row {
+                            Item {
                                 width: parent.width
-                                Text { text: "ipv4"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
-                                Text { text: modelData.ip4; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                                implicitWidth: 18 + vpnDev.implicitWidth + 24 + vpnAddr.implicitWidth
+                                height: 24
+                                Rectangle { anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: root.ok }
+                                Text { id: vpnDev; x: 18; anchors.verticalCenter: parent.verticalCenter; text: modelData.dev; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 14 }
+                                Text { id: vpnAddr; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: modelData.ip4; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13 }
                             }
                             Row {
                                 width: parent.width
-                                Text { text: "routes"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 60 }
-                                Text { text: modelData.routes; color: root.textDefault; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 60; horizontalAlignment: Text.AlignRight; wrapMode: Text.Wrap }
+                                Text { leftPadding: 18; text: "Routes"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: 90 }
+                                Text { text: modelData.routes === "-" ? "none" : modelData.routes; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 90; horizontalAlignment: Text.AlignRight; wrapMode: Text.Wrap }
                             }
                         }
                     }
 
-                    Item { width: 1; height: 4 }
                     Row {
                         spacing: 8
-                        MenuButton {
-                            width: nmtuiText.implicitWidth + 16
-                            onClicked: Quickshell.execDetached(["kitty", "--class", "nmtui-popup", "-e", "nmtui"])
-                            Text {
-                                id: nmtuiText
-                                anchors.centerIn: parent
-                                text: "nmtui"
-                                color: root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                            }
-                        }
-                        MenuButton {
-                            width: qsWifiText.implicitWidth + 16
-                            onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"])
-                            Text {
-                                id: qsWifiText
-                                anchors.centerIn: parent
-                                text: "qs-wifi"
-                                color: root.textDimmer
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                            }
-                        }
+                        topPadding: 8
+                        TextButton { label: "nmtui"; external: true; onClicked: Quickshell.execDetached(["kitty", "--class", "nmtui-popup", "-e", "nmtui"]) }
+                        TextButton { label: "qs-wifi"; external: true; onClicked: Quickshell.execDetached([root.repoScripts + "/qs-wifi"]) }
                     }
                 }
 
