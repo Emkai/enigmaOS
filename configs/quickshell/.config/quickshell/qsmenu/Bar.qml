@@ -158,7 +158,6 @@ if [ -n "$3" ]; then echo "$3" > /sys/devices/system/cpu/intel_pstate/no_turbo |
             sensorProc.running = true;
         }
     }
-    readonly property int fanMax: fans.reduce((m, f) => Math.max(m, f.rpm), 0)
 
     function fmtWatts(w) { return w == null ? "" : w.toFixed(1) + " W"; }
     function fmtNum(w) { return w == null ? "" : w.toFixed(1); }
@@ -1879,26 +1878,16 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     spacing: 0
 
                     Rectangle {
-                        width: cpuRow.implicitWidth + 20
+                        width: cpuText.implicitWidth + 20
                         height: root.barHeight
                         color: hsCpu.open ? root.hoverBg : "transparent"
-                        Row {
-                            id: cpuRow
+                        Text {
+                            id: cpuText
                             anchors.centerIn: parent
-                            spacing: 10
-                            Text {
-                                text: Math.round(root.cpuPct) + "%"
-                                color: root.textBright
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 13
-                            }
-                            Text {
-                                visible: root.fans.length > 0
-                                text: "󰈐 " + root.fanMax
-                                color: root.fanMax > 3000 ? root.dueSoon : root.textBright
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 13
-                            }
+                            text: Math.round(root.cpuPct) + "%"
+                            color: root.textBright
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 13
                         }
                         MouseArea {
                             anchors.fill: parent
