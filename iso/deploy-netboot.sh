@@ -28,7 +28,7 @@ die() { printf '\033[1;31m[deploy-netboot] ERROR:\033[0m %s\n' "$*" >&2; exit 1;
 # enigmaos.ipxe is generated at deploy time so its URLs always match the target.
 STAGE="$ISO_DIR/work/netboot-stage"
 mkdir -p "$STAGE"
-{
+write_ipxe() {
     printf '#!ipxe\n'
     printf 'kernel %s/arch/boot/x86_64/vmlinuz-linux\n' "$BASE_URL"
     # ucode initrds only if the tree carries them — current builds embed
@@ -39,9 +39,11 @@ mkdir -p "$STAGE"
     printf 'initrd %s/arch/boot/x86_64/initramfs-linux.img\n' "$BASE_URL"
     # trailing slash on archiso_http_srv is load-bearing: the initramfs hook
     # appends "arch/x86_64/airootfs.sfs" directly onto it
-    printf 'imgargs vmlinuz-linux initrd=initramfs-linux.img archisobasedir=arch archiso_http_srv=%s/ ip=dhcp BOOTIF=01-${netX/mac} checksum=y\n' "$BASE_URL"
+    printf 'imgargs vmlinuz-linux initrd=initramfs-linux.img archisobasedir=arch archiso_http_srv=%s/ ip=dhcp BOOTIF=01-${netX/mac} checksum=y%s\n' "$BASE_URL" "$1"
     printf 'boot\n'
-} > "$STAGE/enigmaos.ipxe"
+}
+write_ipxe "" > "$STAGE/enigmaos.ipxe"
+write_ipxe " nomodeset" > "$STAGE/enigmaos-safe.ipxe"
 
 log "Pushing $SRC -> $NETBOOT_SSH:$NETBOOT_DIR/arch/ (resumable) ..."
 ssh -o ConnectTimeout=10 "$NETBOOT_SSH" "mkdir -p '$NETBOOT_DIR/arch'" \
@@ -52,7 +54,7 @@ ssh -o ConnectTimeout=10 "$NETBOOT_SSH" "mkdir -p '$NETBOOT_DIR/arch'" \
 # scoped to arch/ so stale kernels/checksums from older builds get cleared.
 rsync -rlt --info=progress2 --partial --inplace --delete \
     "$SRC/" "$NETBOOT_SSH:$NETBOOT_DIR/arch/"
-rsync -lt "$STAGE/enigmaos.ipxe" "$IPXE" "$IPXE_BIOS" "$NETBOOT_SSH:$NETBOOT_DIR/"
+rsync -lt "$STAGE/enigmaos.ipxe" "$STAGE/enigmaos-safe.ipxe" "$IPXE" "$IPXE_BIOS" "$NETBOOT_SSH:$NETBOOT_DIR/"
 
 log "Smoke-testing $BASE_URL ..."
 curl -sfI "$BASE_URL/enigmaos.ipxe" >/dev/null || die "enigmaos.ipxe not served — deployed netboot service? (home-server: ./deploy/netboot.sh)"
