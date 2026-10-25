@@ -2,7 +2,7 @@
 # Build ipxe.efi — the network boot program a PXE-booting machine loads first —
 # with an embedded script that chains straight to boot.ipxe on the netboot
 # server. Two-stage on purpose: iterating on kernel params only means editing
-# boot.ipxe on the server (deploy-netboot.sh regenerates it), never rebuilding
+# enigmaos.ipxe on the server (deploy-netboot.sh regenerates it), never rebuilding
 # iPXE; and the embedded script ignores DHCP-provided filenames, so the DHCP
 # server pointing at ipxe.efi can't loop iPXE back into itself.
 #
