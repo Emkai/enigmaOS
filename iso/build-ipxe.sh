@@ -45,8 +45,9 @@ chain ${CHAIN_URL} || shell
 # keeps cache hits on repeated builds
 [[ -f "$EMBED" && "$(cat "$EMBED")" == "$new_embed" ]] || printf '%s' "$new_embed" > "$EMBED"
 
-if [[ -f "$CACHE/ipxe.efi" && ! "$EMBED" -nt "$CACHE/ipxe.efi" ]]; then
-    log "ipxe.efi up to date (chains $CHAIN_URL)."
+if [[ -f "$CACHE/ipxe.efi" && ! "$EMBED" -nt "$CACHE/ipxe.efi" \
+   && -f "$CACHE/undionly.0" && ! "$EMBED" -nt "$CACHE/undionly.0" ]]; then
+    log "ipxe.efi + undionly.0 up to date (chain $CHAIN_URL)."
     exit 0
 fi
 
@@ -62,3 +63,11 @@ make -C "$SRC/src" -j"$(nproc)" bin-x86_64-efi/snponly.efi EMBED="$EMBED" \
 cp "$SRC/src/bin-x86_64-efi/snponly.efi" "$CACHE/ipxe.efi"
 touch "$CACHE/ipxe.efi"
 log "Done: $CACHE/ipxe.efi ($(du -h "$CACHE/ipxe.efi" | cut -f1))"
+
+# Legacy BIOS build. Named .0 because dnsmasq appends that to x86PC boot names.
+log "Building bin/undionly.kpxe (embeds: chain $CHAIN_URL) ..."
+make -C "$SRC/src" -j"$(nproc)" bin/undionly.kpxe EMBED="$EMBED" \
+    || make -C "$SRC/src" -j"$(nproc)" bin/undionly.kpxe EMBED="$EMBED" NO_WERROR=1
+cp "$SRC/src/bin/undionly.kpxe" "$CACHE/undionly.0"
+touch "$CACHE/undionly.0"
+log "Done: $CACHE/undionly.0 ($(du -h "$CACHE/undionly.0" | cut -f1))"

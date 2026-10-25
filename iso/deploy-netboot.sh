@@ -15,6 +15,7 @@ NETBOOT_SSH="${NETBOOT_SSH:-$NETBOOT_HOST}"          # ssh target (config picks 
 NETBOOT_DIR="${NETBOOT_DIR:-home-server/netboot/data}" # remote, relative to ~
 SRC="$ISO_DIR/out/arch"
 IPXE="$ISO_DIR/cache/ipxe/ipxe.efi"
+IPXE_BIOS="$ISO_DIR/cache/ipxe/undionly.0"
 BASE_URL="http://${NETBOOT_HOST}:${NETBOOT_PORT}"
 
 log() { printf '\033[1;34m[deploy-netboot]\033[0m %s\n' "$*"; }
@@ -22,6 +23,7 @@ die() { printf '\033[1;31m[deploy-netboot] ERROR:\033[0m %s\n' "$*" >&2; exit 1;
 
 [[ -d "$SRC" ]]  || die "no netboot tree at iso/out/arch — run: make netboot"
 [[ -f "$IPXE" ]] || die "no ipxe.efi in iso/cache/ipxe — run: make netboot"
+[[ -f "$IPXE_BIOS" ]] || die "no undionly.0 in iso/cache/ipxe — run: make netboot"
 
 # enigmaos.ipxe is generated at deploy time so its URLs always match the target.
 STAGE="$ISO_DIR/work/netboot-stage"
@@ -50,9 +52,9 @@ ssh -o ConnectTimeout=10 "$NETBOOT_SSH" "mkdir -p '$NETBOOT_DIR/arch'" \
 # scoped to arch/ so stale kernels/checksums from older builds get cleared.
 rsync -rlt --info=progress2 --partial --inplace --delete \
     "$SRC/" "$NETBOOT_SSH:$NETBOOT_DIR/arch/"
-rsync -lt "$STAGE/enigmaos.ipxe" "$IPXE" "$NETBOOT_SSH:$NETBOOT_DIR/"
+rsync -lt "$STAGE/enigmaos.ipxe" "$IPXE" "$IPXE_BIOS" "$NETBOOT_SSH:$NETBOOT_DIR/"
 
 log "Smoke-testing $BASE_URL ..."
 curl -sfI "$BASE_URL/enigmaos.ipxe" >/dev/null || die "enigmaos.ipxe not served — deployed netboot service? (home-server: ./deploy/netboot.sh)"
 curl -sf -r 0-0 -o /dev/null "$BASE_URL/arch/x86_64/airootfs.sfs" || die "airootfs.sfs not served / Range requests broken."
-log "Done. PXE-boot the target (UEFI, IPv4) and pick enigmaOS from the menu at $BASE_URL/boot.ipxe"
+log "Done. PXE-boot the target (IPv4) and pick enigmaOS from the menu at $BASE_URL/boot.ipxe"
