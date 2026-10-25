@@ -64,6 +64,7 @@ blueman
 wireguard-tools
 tailscale
 freerdp
+rclone
 samba          # SMB file sharing / network shares
 brightnessctl
 

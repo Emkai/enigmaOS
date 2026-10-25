@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/power"
 source "$SCRIPT_DIR/vpn"
 source "$SCRIPT_DIR/time"
 source "$SCRIPT_DIR/rdp"
+source "$SCRIPT_DIR/rclone"
 
 # Constants
 power_menu="Power menu"
@@ -16,6 +17,7 @@ wifi_menu="WiFi menu"
 vpn_menu_label="VPN menu"
 time_menu_label="Time menu"
 rdp_menu_label="RDP menu"
+rclone_menu_label="Rclone menu"
 
 main_menu() {
     sub_options="$divider"
@@ -29,7 +31,7 @@ main_menu() {
     esac
 
     while true; do
-        options="$power_menu\n$bluetooth_menu\n$wifi_menu\n$vpn_menu_label\n$rdp_menu_label\n$time_menu_label\n$sub_options"
+        options="$power_menu\n$bluetooth_menu\n$wifi_menu\n$vpn_menu_label\n$rdp_menu_label\n$rclone_menu_label\n$time_menu_label\n$sub_options"
         chosen="$(qs_menu "menu" "$options")"
 
         case $chosen in
@@ -71,6 +73,15 @@ main_menu() {
                 ;;
             $rdp_menu_label)
                 ret=$(rdp_menu -s)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            $rclone_menu_label)
+                ret=$(rclone_menu -s)
                 case $ret in
                     $doexit)
                         echo "$doexit"

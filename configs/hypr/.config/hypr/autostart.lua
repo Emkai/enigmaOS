@@ -9,4 +9,5 @@ hl.on("hyprland.start", function()
     -- "waybar & " above (or run scripts/re_waybar) to bring it back.
     -- quickshell menu daemon (scripts/qs-main starts it on demand too)
     hl.exec_cmd("qs -p ~/.config/quickshell/qsmenu -d")
+    hl.exec_cmd("~/src/enigmaOS/scripts/rclone-sync restore")
 end)

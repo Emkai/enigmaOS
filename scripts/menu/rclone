@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/qsmenu"
+source "$SCRIPT_DIR/../src/rclone.sh"
+
+rclone_auto_on_label="Auto sync: On"
+rclone_auto_off_label="Auto sync: Off"
+rclone_sync_now_label="Sync now"
+rclone_syncing_label="Syncing..."
+rclone_add_label="Add folder"
+rclone_whole_label="(whole library)"
+
+rclone_pick_remote() {
+    local remotes chosen
+    remotes="$(rclone_remotes)"
+    if [[ "$(printf '%s\n' "$remotes" | grep -c .)" -le 1 ]]; then
+        printf '%s\n' "$remotes"
+        return 0
+    fi
+    chosen="$(qs_menu "Remote" "$remotes\n$divider\n$goback")"
+    case $chosen in
+        "" | $divider | $goback) return 1 ;;
+    esac
+    printf '%s\n' "$chosen"
+}
+
+rclone_add_menu() {
+    local remote dirs chosen max_lines=24
+    remote="$(rclone_pick_remote)" || { echo "$goback"; return 0; }
+    [[ -z "$remote" ]] && { notify-send "rclone" "No remotes configured (run rclone config)"; echo "$goback"; return 0; }
+
+    dirs="$(rclone_remote_dirs "$remote")"
+    chosen="$(qs_menu "Sync from $remote" "$dirs\n$rclone_whole_label\n$divider\n$goback\n$doexit")"
+    case $chosen in
+        $divider | $goback) echo "$goback" ;;
+        "" | $doexit) echo "$doexit" ;;
+        $rclone_whole_label) rclone_pair_add "$remote:"; echo "$goback" ;;
+        *) rclone_pair_add "$remote:$chosen"; echo "$goback" ;;
+    esac
+}
+
+rclone_pair_submenu() {
+    local pair="$1" local_dir confirm
+    local open_label="Open folder"
+    local log_label="Show log"
+    local remove_label="Remove"
+    local_dir="$(rclone_pair_local "$pair")"
+
+    while true; do
+        options="$open_label\n$log_label\n$remove_label\n$divider\n$(rclone_pair_status "$pair")\n$local_dir\n$divider\n$goback\n$doexit"
+        chosen="$(qs_menu "$pair" "$options")"
+
+        case $chosen in
+            $open_label)
+                mkdir -p "$local_dir"
+                setsid -f xdg-open "$local_dir" >/dev/null 2>&1
+                echo "$doexit"
+                return 0
+                ;;
+            $log_label)
+                if [[ -f "$(rclone_pair_log "$pair")" ]]; then
+                    setsid -f xdg-open "$(rclone_pair_log "$pair")" >/dev/null 2>&1
+                    echo "$doexit"
+                    return 0
+                fi
+                notify-send "rclone" "No log yet for $pair"
+                ;;
+            $remove_label)
+                confirm="$(qs_menu "Stop syncing '$pair'? Local files are kept." "No\nYes" 2)"
+                if [[ "$confirm" == "Yes" ]]; then
+                    rclone_pair_remove "$pair"
+                    echo "$goback"
+                    return 0
+                fi
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+rclone_menu() {
+    sub_options="$divider"
+    case $1 in
+        -s)
+            sub_options="$sub_options\n$goback\n$doexit"
+            ;;
+        *)
+            sub_options="$sub_options\n$doexit"
+            ;;
+    esac
+
+    local max_lines=24
+    while true; do
+        if rclone_auto_enabled; then
+            auto_option="$rclone_auto_on_label"
+        else
+            auto_option="$rclone_auto_off_label"
+        fi
+        if rclone_syncing; then
+            now_option="$rclone_syncing_label"
+        else
+            now_option="$rclone_sync_now_label"
+        fi
+
+        pair_list=""
+        while IFS= read -r pair; do
+            pair_list="$pair_list$pair  •  $(rclone_pair_status "$pair")\n"
+        done < <(rclone_pairs)
+
+        options="$auto_option\n$now_option\n$divider\n${pair_list}$rclone_add_label\n$sub_options"
+        chosen="$(qs_menu "rclone" "$options")"
+
+        case $chosen in
+            $divider | $rclone_syncing_label)
+                ;;
+            "" | $doexit)
+                echo "$doexit"
+                return 0
+                ;;
+            $goback)
+                echo "$goback"
+                return 0
+                ;;
+            $rclone_auto_on_label)
+                rclone_auto_stop
+                ;;
+            $rclone_auto_off_label)
+                rclone_auto_start
+                ;;
+            $rclone_sync_now_label)
+                rclone_sync_now
+                ;;
+            $rclone_add_label)
+                ret=$(rclone_add_menu)
+                case $ret in
+                    $doexit)
+                        echo "$doexit"
+                        return 0
+                        ;;
+                esac
+                ;;
+            *)
+                pair=$(echo "$chosen" | sed 's/  •.*//')
+                if rclone_pairs | grep -qxF "$pair"; then
+                    ret=$(rclone_pair_submenu "$pair")
+                    case $ret in
+                        $doexit)
+                            echo "$doexit"
+                            return 0
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
+}
