@@ -19,6 +19,14 @@ alias gcm='git commit -m'
 
 alias ch='chromium'
 
+alias ssh='TERM=xterm-256color ssh'
+
+HISTSIZE=1000000
+HISTFILESIZE=1000000
+HISTCONTROL=ignoredups
+shopt -s histappend
+PROMPT_COMMAND="history -a; history -n${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+
 #ask() { claude -p "$*"; }
 
 # Separate Claude Code accounts (isolated config/credentials/history per dir)
