@@ -6,7 +6,7 @@
 # iPXE; and the embedded script ignores DHCP-provided filenames, so the DHCP
 # server pointing at ipxe.efi can't loop iPXE back into itself.
 #
-#   NETBOOT_HOST=10.13.37.109 NETBOOT_PORT=8480 ./iso/build-ipxe.sh
+#   NETBOOT_HOST=10.13.50.10 NETBOOT_PORT=8480 ./iso/build-ipxe.sh
 #
 # Build deps: git gcc binutils make perl xz mtools. The clone and the built
 # binary persist in iso/cache/ipxe/ across rebuilds (cleared by clean-cache);
@@ -17,7 +17,7 @@ ISO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE="$ISO_DIR/cache/ipxe"
 SRC="$CACHE/src"
 IPXE_TAG="${IPXE_TAG:-v2.0.0}"   # what Arch packages today
-NETBOOT_HOST="${NETBOOT_HOST:-10.13.37.109}"
+NETBOOT_HOST="${NETBOOT_HOST:-10.13.50.10}"
 NETBOOT_PORT="${NETBOOT_PORT:-8480}"
 CHAIN_URL="http://${NETBOOT_HOST}:${NETBOOT_PORT}/boot.ipxe"
 

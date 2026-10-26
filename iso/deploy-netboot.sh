@@ -5,11 +5,11 @@
 # 3 GB squashfs left off. The serving side lives in ~/src/home-server
 # (./deploy/netboot.sh there brings up nginx + proxy-DHCP).
 #
-#   NETBOOT_HOST=10.13.37.109 NETBOOT_PORT=8480 ./iso/deploy-netboot.sh
+#   NETBOOT_HOST=10.13.50.10 NETBOOT_PORT=8480 ./iso/deploy-netboot.sh
 set -euo pipefail
 
 ISO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NETBOOT_HOST="${NETBOOT_HOST:-10.13.37.109}"
+NETBOOT_HOST="${NETBOOT_HOST:-10.13.50.10}"
 NETBOOT_PORT="${NETBOOT_PORT:-8480}"
 NETBOOT_SSH="${NETBOOT_SSH:-$NETBOOT_HOST}"          # ssh target (config picks the user)
 NETBOOT_DIR="${NETBOOT_DIR:-home-server/netboot/data}" # remote, relative to ~
