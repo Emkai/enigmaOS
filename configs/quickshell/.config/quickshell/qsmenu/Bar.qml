@@ -614,6 +614,20 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         bottomPadding: 2
     }
 
+    component CopyText: Text {
+        property string copyValue: text.split("/")[0]
+        color: copyArea.containsMouse ? root.accent : root.textBright
+        font.family: Theme.fontFamily
+        font.pixelSize: 13
+        MouseArea {
+            id: copyArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Quickshell.execDetached(["wl-copy", parent.copyValue])
+        }
+    }
+
     component Divider: Rectangle {
         x: -18
         width: parent ? parent.width + 36 : 0
@@ -2806,7 +2820,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                     required property var modelData
                                     width: parent.width
                                     Text { text: modelData.kind; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 150 }
-                                    Text { text: modelData.cidr; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: 150; horizontalAlignment: Text.AlignRight }
+                                    CopyText { text: modelData.cidr; width: 150; horizontalAlignment: Text.AlignRight }
                                 }
                             }
                             Text {
@@ -2819,7 +2833,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             Row {
                                 width: parent.width
                                 Text { text: "gateway"; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13; width: parent.width - 120 }
-                                Text { text: modelData.gw; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13; width: 120; horizontalAlignment: Text.AlignRight }
+                                CopyText { text: modelData.gw; width: 120; horizontalAlignment: Text.AlignRight }
                             }
                         }
                     }
@@ -2890,7 +2904,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                 delegate: Row {
                                     required property var modelData
                                     Text { width: 90; text: modelData[0]; color: root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13 }
-                                    Text { text: modelData[1]; color: root.textBright; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                                    CopyText { text: modelData[1] }
                                 }
                             }
                         }

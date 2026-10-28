@@ -11,7 +11,7 @@ local BUILD_MODES = {
     escu = {
         { key = "sil_local",  label = "SIL local (scons)" },
         { key = "sil_docker", label = "SIL docker image" },
-        { key = "firmware",   label = "Firmware (armgccscons)" },
+        { key = "firmware",   label = "Firmware (CI image)" },
     },
     sil = {
         { key = "full_stack",    label = "Full stack: bms+escu+sil+tools + pin .env" },
