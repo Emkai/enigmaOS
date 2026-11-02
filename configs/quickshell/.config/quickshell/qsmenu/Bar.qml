@@ -974,6 +974,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             font.pixelSize: 13
         }
         Text {
+            id: ptitle
             anchors.left: pdotBg.right
             anchors.leftMargin: 8
             anchors.right: pfeed.left
@@ -984,6 +985,58 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             color: pma.containsMouse ? root.accent : (prow.fresh ? root.textBright : root.textDim)
             font.family: Theme.fontFamily
             font.pixelSize: 13
+        }
+        property bool tipShown: false
+        Timer { id: tipClose; interval: 120; onTriggered: if (!pma.containsMouse && !tipHover.hovered) prow.tipShown = false }
+        Connections {
+            target: pma
+            function onContainsMouseChanged() {
+                if (pma.containsMouse && ptitle.truncated) prow.tipShown = true;
+                else tipClose.restart();
+            }
+        }
+        PopupWindow {
+            visible: prow.tipShown && prow.visible
+            anchor.item: ptitle
+            anchor.rect.x: -6
+            anchor.rect.y: -(implicitHeight - ptitle.height) / 2
+            implicitWidth: Math.min(tipText.implicitWidth, 560) + 12
+            implicitHeight: tipText.height + 8
+            color: "transparent"
+            HoverHandler {
+                id: tipHover
+                onHoveredChanged: {
+                    if (hovered) hsFeed.enter();
+                    else { hsFeed.leave(); tipClose.restart(); }
+                }
+            }
+            Rectangle {
+                anchors.fill: parent
+                radius: 2
+                color: root.bg
+                border.width: 1
+                border.color: root.accent
+                Text {
+                    id: tipText
+                    x: 6
+                    y: 4
+                    width: Math.min(implicitWidth, 560)
+                    text: prow.modelData.title
+                    wrapMode: Text.Wrap
+                    color: root.accent
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 13
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        prow.tipShown = false;
+                        FeedStore.markPostRead(prow.modelData.feedUrl, prow.modelData.id);
+                        Quickshell.execDetached(["xdg-open", prow.modelData.url]);
+                    }
+                }
+            }
         }
         Text {
             id: pfeed
