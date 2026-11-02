@@ -110,12 +110,21 @@ local CONFIGS = {
     { var = "echandia_launch_gen_config", prompt = "Generate config on launch: ", default = "false", repos = { "bms", "escu" } },
     { var = "echandia_escu_hw", prompt = "EScu hardware type (-w, e.g. 10 = s05 | none): ", default = "none", repos = { "escu", "sil" } },
     { var = "echandia_module_type", prompt = "Module type (23ah | 20ah | 26ah | 155ah): ", default = "23ah", repos = { "bms", "sil" } },
+    { var = "echandia_escu_builder_image", prompt = "Firmware builder image (-i | none): ", default = "none", repos = { "escu" } },
     { var = "echandia_module_sim", prompt = "Module simulator (lumped | cell): ", default = "lumped", repos = { "escu", "sil" } },
     { var = "echandia_ch1", prompt = "CMUs on CAN channel 1 (0..28 | none): ", default = "none", repos = { "bms", "sil" } },
     { var = "echandia_ch2", prompt = "CMUs on CAN channel 2 (0..28 | none): ", default = "none", repos = { "bms", "sil" } },
     { var = "echandia_sil_boxe", prompt = "Box mode subnet 10.10.10.0/24 (--boxe): ", default = "false", repos = { "sil" } },
     { var = "echandia_sil_password", prompt = "SIL password: ", default = "", repos = { "sil" } },
 }
+
+local function builder_image_flag()
+    local img = vim.g.echandia_escu_builder_image
+    if not img or img == "" or img == "none" then
+        return ""
+    end
+    return " -i " .. vim.fn.shellescape(img)
+end
 
 local function config_spec(var)
     for _, c in ipairs(CONFIGS) do
@@ -312,6 +321,8 @@ function M.deploy()
                     )
                     if arch then
                         cmd = cmd .. " -a " .. vim.fn.shellescape(arch)
+                    else
+                        cmd = cmd .. builder_image_flag()
                     end
                 end
                 M.run_in_float(cmd, function()
@@ -521,9 +532,10 @@ function M.build(after)
                 run_build(cmd)
             else
                 local cmd = string.format(
-                    "%s/build_escu.sh -s %s",
+                    "%s/build_escu.sh -s %s%s",
                     SCRIPTS_DIR,
-                    vim.fn.shellescape(cwd)
+                    vim.fn.shellescape(cwd),
+                    builder_image_flag()
                 )
                 run_build(cmd)
             end
@@ -580,6 +592,21 @@ function M.clean()
         vim.fn.shellescape(cwd .. "/EBMS")
     )
     M.run_in_float(cmd)
+end
+
+function M.build_builder()
+    if M.detect_repo() ~= "escu" then
+        notify_err("Build builder: not in an escu repo")
+        return
+    end
+    local img = vim.g.echandia_escu_builder_image
+    local tag = (img and img ~= "" and img ~= "none") and " -t " .. vim.fn.shellescape(img) or ""
+    M.run_in_float(string.format(
+        "%s/build_escu_builder.sh -s %s%s",
+        SCRIPTS_DIR,
+        vim.fn.shellescape(vim.fn.getcwd()),
+        tag
+    ))
 end
 
 function M.generate_embedded()
@@ -797,6 +824,7 @@ end
 -- behind one `es` walk (see CONFIGS) instead of a keymap per setting.
 M.keymaps = {
     { lhs = "eb", fn = M.build,             repos = { "bms", "escu", "sil" }, desc = "Echandia build" },
+    { lhs = "eB", fn = M.build_builder,     repos = { "escu" },               desc = "Echandia build firmware builder image (escu)" },
     { lhs = "ec", fn = M.clean,             repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
     { lhs = "ed", fn = M.deploy,            repos = { "bms", "escu" },        desc = "Echandia deploy" },
     { lhs = "el", fn = M.launch,            repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
