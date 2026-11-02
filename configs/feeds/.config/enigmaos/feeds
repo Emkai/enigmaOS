@@ -8,6 +8,7 @@ clear = 30d
 https://archlinux.org/feeds/news/ Arch Linux News
 https://lwn.net/headlines/rss LWN.net
 https://github.com/hyprwm/Hyprland/releases.atom Hyprland releases
+https://security.archlinux.org/advisory/feed.atom Arch Linux Security
 
 [news]
 counter = off

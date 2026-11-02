@@ -110,7 +110,7 @@ Singleton {
                 continue;
             }
             const m = /^(\S+)\s*(.*)$/.exec(line);
-            cat.feeds.push({ url: m[1], name: m[2].trim() });
+            cat.feeds.push({ url: /^[a-z][\w+.-]*:\/\//i.test(m[1]) ? m[1] : "https://" + m[1], name: m[2].trim() });
         }
         return cats;
     }
@@ -152,6 +152,13 @@ Singleton {
         store._saveState();
     }
 
+    function markPostRead(feedUrl, id, read) {
+        const patch = read === false ? { read: false, seen: Date.now() } : { read: true };
+        store.feeds = store.feeds.map(f => f.url !== feedUrl ? f
+            : Object.assign({}, f, { posts: f.posts.map(p => p.id === id ? Object.assign({}, p, patch) : p) }));
+        store._saveState();
+    }
+
     function refresh() {
         if (store._job) {
             store._refetch = true;
@@ -160,7 +167,8 @@ Singleton {
         const defs = [];
         for (const c of store.config)
             for (const f of c.feeds)
-                defs.push(f);
+                if (!defs.some(d => d.url === f.url))
+                    defs.push(f);
         const prev = {};
         for (const f of store.feeds)
             prev[f.url] = f;
@@ -235,10 +243,11 @@ Singleton {
         const fetched = Date.now();
         const known = {};
         for (const p of out.posts)
-            known[p.id] = p.seen;
+            known[p.id] = p;
         const firstFetch = out.posts.length === 0;
         for (const p of parsed.posts) {
-            p.seen = p.id in known ? known[p.id] : (firstFetch ? Math.min(p.time || 0, fetched) : fetched);
+            p.seen = p.id in known ? known[p.id].seen : (firstFetch ? Math.min(p.time || 0, fetched) : fetched);
+            p.read = p.id in known && !!known[p.id].read;
             p.time = Math.min(p.time || p.seen, fetched);
         }
         parsed.posts.sort((a, b) => b.time - a.time);
@@ -348,7 +357,8 @@ Singleton {
                     .filter(p => !c.clear || nowMs - p.time < c.clear)
                     .map(p => Object.assign({}, p, {
                         feed: title,
-                        fresh: p.seen > checked && (!c.markRead || nowMs - p.seen < c.markRead)
+                        feedUrl: def.url,
+                        fresh: !p.read && p.seen > checked && (!c.markRead || nowMs - p.seen < c.markRead)
                     }));
                 const fresh = posts.filter(p => p.fresh).length;
                 catFresh += fresh;
@@ -360,7 +370,7 @@ Singleton {
 
     readonly property var newPosts: {
         const out = [];
-        for (const c of store.view)
+        for (const c of store.view.filter(c => c.counter))
             for (const f of c.feeds)
                 for (const p of f.posts)
                     if (p.fresh)

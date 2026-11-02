@@ -957,15 +957,25 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         color: pma.containsMouse ? root.hoverBg : "transparent"
 
         Rectangle {
-            id: pdot
-            x: 6
+            id: pdotBg
+            x: 2
             anchors.verticalCenter: parent.verticalCenter
-            width: 6; height: 6; radius: 3
-            color: prow.fresh ? root.accent : root.hairline
+            width: 22; height: 20; radius: 2
+            color: dma.containsMouse ? root.hoverBg : "transparent"
+            border.width: dma.containsMouse ? 1 : 0
+            border.color: root.hairline
         }
         Text {
-            anchors.left: pdot.right
-            anchors.leftMargin: 10
+            id: pdot
+            anchors.centerIn: pdotBg
+            text: (prow.fresh !== dma.containsMouse) ? "\uf06e" : "\uf070"
+            color: dma.containsMouse ? root.accent : (prow.fresh ? root.accent : root.textFaint)
+            font.family: Theme.fontFamily
+            font.pixelSize: 13
+        }
+        Text {
+            anchors.left: pdotBg.right
+            anchors.leftMargin: 8
             anchors.right: pfeed.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
@@ -1005,7 +1015,17 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: Quickshell.execDetached(["xdg-open", prow.modelData.url])
+            onClicked: {
+                FeedStore.markPostRead(prow.modelData.feedUrl, prow.modelData.id);
+                Quickshell.execDetached(["xdg-open", prow.modelData.url]);
+            }
+        }
+        MouseArea {
+            id: dma
+            anchors.fill: pdotBg
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: FeedStore.markPostRead(prow.modelData.feedUrl, prow.modelData.id, prow.fresh)
         }
     }
 
@@ -1105,7 +1125,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             topPadding: 2
             bottomPadding: 6
             Repeater {
-                model: frow.modelData.posts.slice(0, 12)
+                model: frow.modelData.posts.filter(p => p.fresh).concat(frow.modelData.posts.filter(p => !p.fresh)).slice(0, 12)
                 delegate: PostRow { showFeed: false }
             }
         }
@@ -1845,16 +1865,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             }
             HoverState {
                 id: hsFeed
-                property real openedAt: 0
-                onOpenChanged: {
-                    if (open) {
-                        openedAt = Date.now();
-                        return;
-                    }
-                    if (Date.now() - openedAt > 1500)
-                        FeedStore.markSeen();
-                    root.feedExpandedId = "";
-                }
+                onOpenChanged: if (!open) root.feedExpandedId = ""
             }
             HoverState { id: hsClock }
             HoverState { id: hsCpu }
