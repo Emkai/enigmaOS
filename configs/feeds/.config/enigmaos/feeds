@@ -1,0 +1,29 @@
+# [category]  counter = on|off  mark_read = 12h|2d|1w|off  clear = 30d|off
+# url [display name]
+
+[linux]
+counter = on
+mark_read = off
+clear = 30d
+https://archlinux.org/feeds/news/ Arch Linux News
+https://lwn.net/headlines/rss LWN.net
+https://github.com/hyprwm/Hyprland/releases.atom Hyprland releases
+
+[news]
+counter = off
+mark_read = 12h
+clear = 3d
+https://www.phoronix.com/rss.php Phoronix
+https://news.ycombinator.com/rss Hacker News
+
+[Security]
+counter = on
+mark_read = off
+clear = off
+https://aws.amazon.com/security/security-bulletins/rss/feed/ AWS Security Bulletins
+https://www.bleepingcomputer.com/feed/ BleepingComputer
+https://cert.europa.eu/publications/security-advisories-rss CERT-EU
+https://www.cert.se/feed.rss CERT-SE
+https://www.cisa.gov/cybersecurity-advisories/all.xml CISA (US)
+https://isc.sans.edu/rssfeed.xml SANS Internet Storm Center
+https://ubuntu.com/security/notices/rss.xml Ubuntu Security Notices

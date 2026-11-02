@@ -536,7 +536,8 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         margins.left: align === "center" ? Math.round((screenWidth - implicitWidth) / 2) : 12
         margins.right: 12
         implicitWidth: Math.max(minWidth, Math.min(maxWidth, contentWidth + 2 * col.x))
-        implicitHeight: col.implicitHeight + 2 * col.y
+        implicitHeight: barScreen ? barScreen.height - margins.top - 12 : 0
+        mask: Region { item: card }
 
         // Natural width of an item tree. Positioners (Row/Column/Grid/Flow) can't
         // report one: their implicitWidth is read-only and tracks their children's
@@ -588,7 +589,10 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         }
 
         Rectangle {
-            anchors.fill: parent
+            id: card
+            width: parent.width
+            height: Math.min(parent.height, col.implicitHeight + 2 * col.y)
+            clip: true
             color: root.cardBg
             radius: 2
             border.width: 1
@@ -934,6 +938,239 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             y: 12
             width: parent.width - 24
             spacing: 6
+        }
+    }
+
+    property string feedExpandedId: ""
+    readonly property int feedRowWidth: 460
+    readonly property int feedAgeWidth: 34
+
+    component PostRow: Rectangle {
+        id: prow
+        required property var modelData
+        property bool showFeed: true
+        readonly property bool fresh: modelData.fresh
+        width: parent ? parent.width : 0
+        implicitWidth: root.feedRowWidth
+        height: 24
+        radius: 2
+        color: pma.containsMouse ? root.hoverBg : "transparent"
+
+        Rectangle {
+            id: pdot
+            x: 6
+            anchors.verticalCenter: parent.verticalCenter
+            width: 6; height: 6; radius: 3
+            color: prow.fresh ? root.accent : root.hairline
+        }
+        Text {
+            anchors.left: pdot.right
+            anchors.leftMargin: 10
+            anchors.right: pfeed.left
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: prow.modelData.title
+            elide: Text.ElideRight
+            color: pma.containsMouse ? root.accent : (prow.fresh ? root.textBright : root.textDim)
+            font.family: Theme.fontFamily
+            font.pixelSize: 13
+        }
+        Text {
+            id: pfeed
+            anchors.right: page.left
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            width: prow.showFeed ? Math.min(implicitWidth, 130) : 0
+            visible: prow.showFeed
+            text: prow.showFeed ? prow.modelData.feed : ""
+            elide: Text.ElideRight
+            color: root.textDimmer
+            font.family: Theme.fontFamily
+            font.pixelSize: 12
+        }
+        Text {
+            id: page
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.feedAgeWidth
+            horizontalAlignment: Text.AlignRight
+            text: FeedStore.ago(prow.modelData.time)
+            color: prow.fresh ? root.textDim : root.textFaint
+            font.family: Theme.fontFamily
+            font.pixelSize: 12
+        }
+        MouseArea {
+            id: pma
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Quickshell.execDetached(["xdg-open", prow.modelData.url])
+        }
+    }
+
+    component FeedRow: Column {
+        id: frow
+        required property var modelData
+        readonly property bool expanded: root.feedExpandedId === modelData.id
+        readonly property int fresh: modelData.fresh
+        width: parent ? parent.width : 0
+
+        Rectangle {
+            width: parent.width
+            implicitWidth: root.feedRowWidth
+            height: 26
+            radius: 2
+            color: fma.containsMouse ? root.hoverBg : "transparent"
+
+            Text {
+                id: fchev
+                x: 6
+                width: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: frow.expanded ? "" : ""
+                color: root.textDimmer
+                font.family: Theme.fontFamily
+                font.pixelSize: 10
+            }
+            Text {
+                anchors.left: fchev.right
+                anchors.leftMargin: 8
+                anchors.right: fbadge.left
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: frow.modelData.title
+                elide: Text.ElideRight
+                color: frow.fresh > 0 ? root.textBright : root.textDim
+                font.family: Theme.fontFamily
+                font.pixelSize: 13
+            }
+            Rectangle {
+                id: fbadge
+                anchors.right: ferr.visible ? ferr.left : fage.left
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                visible: frow.fresh > 0
+                width: Math.max(22, fbadgeText.implicitWidth + 12)
+                height: 16
+                radius: 8
+                color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
+                Text {
+                    id: fbadgeText
+                    anchors.centerIn: parent
+                    text: frow.fresh
+                    color: root.accent
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                }
+            }
+            Text {
+                id: fage
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !ferr.visible
+                width: root.feedAgeWidth
+                horizontalAlignment: Text.AlignRight
+                text: frow.modelData.posts.length ? FeedStore.ago(frow.modelData.posts[0].time) : ""
+                color: root.textFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+            Text {
+                id: ferr
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                visible: frow.modelData.error !== ""
+                text: frow.modelData.error
+                color: root.dueLate
+                font.family: Theme.fontFamily
+                font.pixelSize: 12
+            }
+            MouseArea {
+                id: fma
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.feedExpandedId = frow.expanded ? "" : frow.modelData.id
+            }
+        }
+
+        Column {
+            x: 18
+            width: parent.width - 18
+            visible: frow.expanded
+            topPadding: 2
+            bottomPadding: 6
+            Repeater {
+                model: frow.modelData.posts.slice(0, 12)
+                delegate: PostRow { showFeed: false }
+            }
+        }
+    }
+
+    component FeedCategory: Column {
+        id: fcat
+        required property var modelData
+        width: parent ? parent.width : 0
+        topPadding: 6
+
+        Item {
+            width: parent.width
+            implicitWidth: root.feedRowWidth
+            height: 24
+
+            SectionLabel {
+                id: fcName
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                topPadding: 0
+                bottomPadding: 0
+                text: fcat.modelData.name.toUpperCase()
+            }
+            Text {
+                anchors.left: fcName.right
+                anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: [fcat.modelData.markRead ? "read after " + FeedStore.duration(fcat.modelData.markRead) : "",
+                       fcat.modelData.clear ? "clear after " + FeedStore.duration(fcat.modelData.clear) : ""]
+                      .filter(s => s).join(" · ")
+                color: root.textFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: 11
+            }
+            MenuButton {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                discrete: true
+                implicitHeight: 20
+                width: fcBell.implicitWidth + 2 * contentInset
+                onClicked: FeedStore.setCounter(fcat.modelData.name, !fcat.modelData.counter)
+                Row {
+                    id: fcBell
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Text {
+                        text: fcat.modelData.counter ? "in bar" : "muted"
+                        color: root.textDimmer
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 11
+                    }
+                    Text {
+                        text: fcat.modelData.counter ? "\uf0f3" : "\uf1f6"
+                        color: fcat.modelData.counter ? root.accent : root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 12
+                    }
+                }
+            }
+        }
+
+        Repeater {
+            model: fcat.modelData.feeds
+            delegate: FeedRow {}
         }
     }
 
@@ -1606,6 +1843,19 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     || (root.todoComposing && (newTaskInput.text !== "" || newDescInput.text !== ""
                         || newDue.hasDate))
             }
+            HoverState {
+                id: hsFeed
+                property real openedAt: 0
+                onOpenChanged: {
+                    if (open) {
+                        openedAt = Date.now();
+                        return;
+                    }
+                    if (Date.now() - openedAt > 1500)
+                        FeedStore.markSeen();
+                    root.feedExpandedId = "";
+                }
+            }
             HoverState { id: hsClock }
             HoverState { id: hsCpu }
             HoverState { id: hsRam }
@@ -1695,6 +1945,39 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                     todoDropdown.focusComposer();
                                 }
                             }
+                        }
+                    }
+
+                    Rectangle {
+                        width: feedRow.implicitWidth + 18
+                        height: root.barHeight
+                        color: hsFeed.open ? root.hoverBg : "transparent"
+
+                        Row {
+                            id: feedRow
+                            anchors.centerIn: parent
+                            spacing: 5
+
+                            Text {
+                                text: ""
+                                color: FeedStore.counterNew > 0 ? root.accent : root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                text: FeedStore.counterNew
+                                visible: FeedStore.counterNew > 0
+                                color: root.textDefault
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: hsFeed.enter()
+                            onExited: hsFeed.leave()
                         }
                     }
 
@@ -2090,6 +2373,94 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                             font.family: Theme.fontFamily
                             font.pixelSize: 12
                             visible: newDescInput.text === ""
+                        }
+                    }
+                }
+
+                Dropdown {
+                    barScreen: barWin.screen
+                    hover: hsFeed
+                    align: "left"
+                    minWidth: root.feedRowWidth + 36
+
+                    SectionHeader {
+                        text: "FEEDS"
+                        Row {
+                            Text {
+                                text: FeedStore.totalNew > 0 ? FeedStore.totalNew + " new" : "all caught up"
+                                color: FeedStore.totalNew > 0 ? root.accent : root.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                            Text {
+                                text: " · checked " + FeedStore.since(FeedStore.lastChecked)
+                                color: root.textDimmer
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
+                        }
+                    }
+
+                    Text {
+                        visible: FeedStore.totalNew === 0
+                        text: "nothing new since you last looked"
+                        color: root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                        topPadding: 4
+                        bottomPadding: 2
+                    }
+
+                    Repeater {
+                        model: FeedStore.newPosts.slice(0, 8)
+                        delegate: PostRow {}
+                    }
+
+                    Text {
+                        visible: FeedStore.totalNew > 8
+                        text: "+ " + (FeedStore.totalNew - 8) + " more"
+                        color: root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 12
+                        leftPadding: 22
+                    }
+
+                    Item { width: parent.width; height: 4 }
+                    Divider {}
+
+                    Text {
+                        visible: FeedStore.config.length === 0
+                        text: "add feeds to ~/.config/enigmaos/feeds"
+                        color: root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                        topPadding: 6
+                    }
+
+                    Repeater {
+                        model: FeedStore.view
+                        delegate: FeedCategory {}
+                    }
+
+                    Footer {
+                        TextButton { icon: ""; label: "Mark read"; onClicked: FeedStore.markSeen() }
+                        TextButton { icon: ""; label: "Refresh"; onClicked: FeedStore.refresh() }
+                        TextButton {
+                            icon: "\uf013"
+                            label: "Setup"
+                            onClicked: {
+                                FeedStore.configOpen = true;
+                                hsFeed.open = false;
+                            }
+                        }
+                        Text {
+                            height: 28
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 6
+                            text: FeedStore.fetching ? "fetching..." : "fetched " + FeedStore.since(FeedStore.lastFetched)
+                            color: root.textFaint
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 12
                         }
                     }
                 }

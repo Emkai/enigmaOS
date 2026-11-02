@@ -18,4 +18,5 @@ ShellRoot {
     Menu {}
     Drun {}
     Bar {}
+    FeedConfig {}
 }
