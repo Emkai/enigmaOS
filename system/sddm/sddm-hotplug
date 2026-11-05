@@ -1,5 +1,5 @@
 #!/bin/sh
-pgrep -x sddm-greeter-qt6 >/dev/null || exit 0
+pgrep -f sddm-greeter-qt6 >/dev/null || exit 0
 auth=$(pgrep -a -x Xorg | sed -n 's/.* -auth \([^ ]*\).*/\1/p' | head -n1)
 [ -n "$auth" ] || exit 0
 sleep 1
