@@ -27,6 +27,7 @@ wtype          # types text into the focused window — used by scripts/dictate
 nwg-look
 xorg-server
 xorg-xinit
+xorg-xrandr
 wayland-utils
 xdg-desktop-portal-gtk
 xdg-desktop-portal-hyprland
@@ -65,6 +66,7 @@ wireguard-tools
 tailscale
 freerdp
 rclone
+jq
 samba          # SMB file sharing / network shares
 brightnessctl
 

@@ -23,6 +23,13 @@ source "$ENIGMA_ROOT/lib/common.sh"
 # patch has to be reapplied here every run rather than living purely as a
 # git-tracked config.
 
+log "Installing sddm monitor hotplug handling (xrandr --auto on the X11 greeter)"
+sudo install -Dm755 "$ENIGMA_ROOT/system/sddm/sddm-hotplug" /usr/local/bin/sddm-hotplug
+sudo install -Dm755 "$ENIGMA_ROOT/system/sddm/sddm-hotplug.sleep" /usr/lib/systemd/system-sleep/sddm-hotplug
+sudo install -Dm755 "$ENIGMA_ROOT/system/sddm/Xsetup" /etc/sddm/Xsetup
+sudo install -Dm644 "$ENIGMA_ROOT/system/sddm/95-sddm-hotplug.rules" /etc/udev/rules.d/95-sddm-hotplug.rules
+sudo udevadm control --reload
+
 theme_dir="/usr/share/sddm/themes/silent"
 overrides_dir="$ENIGMA_ROOT/system/sddm/silent"
 

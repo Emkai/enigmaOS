@@ -2,6 +2,6 @@
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 source "$SCRIPT_DIR/menu/qsmenu"
-source "$SCRIPT_DIR/menu/time"
+source "$SCRIPT_DIR/menu/docker"
 
-time_menu "$@"
+docker_menu "$@"

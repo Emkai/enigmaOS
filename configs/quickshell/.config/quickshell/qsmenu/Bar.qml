@@ -355,6 +355,62 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         }
     }
 
+    // ---- Docker containers ----
+    property bool dockerAvailable: false
+    property var dockerList: []
+    property int dockerRunning: 0
+    property var dockerBusy: ({})
+
+    Timer { interval: 5000; running: true; repeat: true; triggeredOnStart: true; onTriggered: dockerProc.running = true }
+
+    Process {
+        id: dockerProc
+        command: ["docker", "ps", "-a", "--format", "{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Image}}"]
+        onExited: code => { if (code !== 0) root.dockerAvailable = false; }
+        stdout: StdioCollector {
+            id: dockerCollector
+            onStreamFinished: {
+                const out = [];
+                for (const line of dockerCollector.text.split("\n")) {
+                    const p = line.split("\t");
+                    if (p.length < 5) continue;
+                    out.push({ id: p[0], name: p[1], state: p[2], status: p[3], image: p[4], running: p[2] === "running" || p[2] === "restarting" || p[2] === "paused" });
+                }
+                out.sort((a, b) => (b.running - a.running) || a.name.localeCompare(b.name));
+                root.dockerList = out;
+                root.dockerRunning = out.filter(c => c.running).length;
+                root.dockerAvailable = true;
+            }
+        }
+    }
+
+    function dockerAction(action, list) {
+        if (!Array.isArray(list)) list = [list];
+        if (list.length === 0) return;
+        const busy = Object.assign({}, root.dockerBusy);
+        for (const c of list) busy[c.id] = action;
+        root.dockerBusy = busy;
+        dockerActComp.createObject(root, { action: action, cids: list.map(c => c.id) });
+    }
+
+    Component {
+        id: dockerActComp
+        Process {
+            id: act
+            property string action
+            property var cids: []
+            command: ["docker", action].concat(cids)
+            running: true
+            onExited: {
+                const busy = Object.assign({}, root.dockerBusy);
+                for (const id of act.cids) delete busy[id];
+                root.dockerBusy = busy;
+                dockerProc.running = true;
+                act.destroy();
+            }
+        }
+    }
+
     // ---- Network details (ip/gateway/link + wifi list), via nmcli/ip ----
     property string netKind: "none" // "ethernet" | "wifi" | "none"
     property bool wifiRadio: true
@@ -896,6 +952,53 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
         }
     }
 
+    component DockerRow: Item {
+        id: drow
+        required property var modelData
+        readonly property string busy: root.dockerBusy[modelData.id] || ""
+        property bool confirmRm: false
+        Timer { id: rmReset; interval: 3000; onTriggered: drow.confirmRm = false }
+        width: parent ? parent.width : 0
+        implicitWidth: 18 + Math.max(dName.implicitWidth, dSub.implicitWidth) + 16 + 2 * 28 + 4
+        implicitHeight: 38
+        Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 8; height: 8; radius: 4
+            color: drow.busy !== "" ? root.dueSoon : drow.modelData.state === "running" ? root.ok : drow.modelData.running ? root.dueSoon : root.textFaint
+        }
+        Column {
+            x: 18
+            anchors.verticalCenter: parent.verticalCenter
+            width: btns.x - x - 16
+            spacing: 1
+            Text { id: dName; width: parent.width; elide: Text.ElideRight; text: drow.modelData.name; color: drow.modelData.running ? root.textBright : root.textDim; font.family: Theme.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold }
+            Text { id: dSub; width: parent.width; elide: Text.ElideRight; text: drow.busy !== "" ? ({ restart: "restarting…", stop: "stopping…", start: "starting…", rm: "deleting…" })[drow.busy] : drow.confirmRm ? "click again to delete" : drow.modelData.status; color: root.textDimmer; font.family: Theme.fontFamily; font.pixelSize: 12 }
+        }
+        Row {
+            id: btns
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 4
+            enabled: drow.busy === ""
+            Repeater {
+                model: drow.modelData.running ? [["restart", ""], ["stop", ""]] : [["start", ""], ["rm", ""]]
+                delegate: MenuButton {
+                    id: dbtn
+                    required property var modelData
+                    width: 28
+                    implicitHeight: 28
+                    discrete: true
+                    onClicked: {
+                        if (modelData[0] !== "rm") root.dockerAction(modelData[0], drow.modelData);
+                        else if (drow.confirmRm) { drow.confirmRm = false; root.dockerAction("rm", drow.modelData); }
+                        else { drow.confirmRm = true; rmReset.restart(); }
+                    }
+                    Text { anchors.centerIn: parent; text: dbtn.modelData[1]; color: dbtn.modelData[0] === "rm" && drow.confirmRm ? root.dueLate : root.textDim; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                }
+            }
+        }
+    }
+
     component TextButton: MenuButton {
         id: tb
         property string label
@@ -987,19 +1090,23 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             font.pixelSize: 13
         }
         property bool tipShown: false
+        property point tipPos: Qt.point(0, 0)
         Timer { id: tipClose; interval: 120; onTriggered: if (!pma.containsMouse && !tipHover.hovered) prow.tipShown = false }
         Connections {
             target: pma
             function onContainsMouseChanged() {
-                if (pma.containsMouse && ptitle.truncated) prow.tipShown = true;
+                if (pma.containsMouse && ptitle.truncated) {
+                    prow.tipPos = Qt.point(pma.mouseX, pma.mouseY);
+                    prow.tipShown = true;
+                }
                 else tipClose.restart();
             }
         }
         PopupWindow {
             visible: prow.tipShown && prow.visible
-            anchor.item: ptitle
-            anchor.rect.x: -6
-            anchor.rect.y: -(implicitHeight - ptitle.height) / 2
+            anchor.item: prow
+            anchor.rect.x: prow.tipPos.x + 12
+            anchor.rect.y: prow.tipPos.y + 16
             implicitWidth: Math.min(tipText.implicitWidth, 560) + 12
             implicitHeight: tipText.height + 8
             color: "transparent"
@@ -1924,6 +2031,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
             HoverState { id: hsCpu }
             HoverState { id: hsRam }
             HoverState { id: hsVpn }
+            HoverState { id: hsDocker }
             HoverState { id: hsVol }
             HoverState { id: hsBt }
             HoverState { id: hsNet }
@@ -2747,6 +2855,28 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                         }
                     }
 
+                    // Docker
+                    Rectangle {
+                        visible: root.dockerAvailable
+                        width: dockerIcons.implicitWidth + 14
+                        height: root.barHeight
+                        color: hsDocker.open ? root.hoverBg : "transparent"
+                        Row {
+                            id: dockerIcons
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Text { text: ""; color: root.dockerRunning > 0 ? root.accent : root.textDim; font.family: Theme.fontFamily; font.pixelSize: 14 }
+                            Text { text: root.dockerRunning; visible: root.dockerRunning > 0; color: root.accent; font.family: Theme.fontFamily; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: hsDocker.enter()
+                            onExited: hsDocker.leave()
+                            onClicked: Quickshell.execDetached([root.repoScripts + "/qs-docker"])
+                        }
+                    }
+
                     // Keyboard layout
                     Rectangle {
                         width: kbText.implicitWidth + 16
@@ -2913,6 +3043,59 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                     Text {
                         visible: root.vpnEntries.length === 0
                         text: "no active VPN connections"
+                        color: root.textFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 13
+                    }
+                }
+
+                Dropdown {
+                    barScreen: barWin.screen
+                    hover: hsDocker
+                    align: "right"
+                    minWidth: 340
+
+                    Item {
+                        width: parent.width
+                        visible: root.dockerRunning > 0
+                        implicitWidth: runningLbl.implicitWidth + 16 + runningBtns.implicitWidth
+                        implicitHeight: Math.max(runningLbl.implicitHeight, runningBtns.implicitHeight)
+                        SectionLabel { id: runningLbl; text: "RUNNING"; anchors.verticalCenter: parent.verticalCenter }
+                        Row {
+                            id: runningBtns
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "restart all"; textColor: root.textDim; onClicked: root.dockerAction("restart", root.dockerList.filter(c => c.running)) }
+                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "stop all"; textColor: root.textDim; onClicked: root.dockerAction("stop", root.dockerList.filter(c => c.running)) }
+                        }
+                    }
+                    Repeater {
+                        model: root.dockerList.filter(c => c.running)
+                        delegate: DockerRow {}
+                    }
+                    Divider { visible: root.dockerRunning > 0 && root.dockerRunning < root.dockerList.length }
+                    Item {
+                        width: parent.width
+                        visible: root.dockerRunning < root.dockerList.length
+                        implicitWidth: stoppedLbl.implicitWidth + 16 + stoppedBtns.implicitWidth
+                        implicitHeight: Math.max(stoppedLbl.implicitHeight, stoppedBtns.implicitHeight)
+                        SectionLabel { id: stoppedLbl; text: "STOPPED"; anchors.verticalCenter: parent.verticalCenter }
+                        Row {
+                            id: stoppedBtns
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "start all"; textColor: root.textDim; onClicked: root.dockerAction("start", root.dockerList.filter(c => !c.running)) }
+                        }
+                    }
+                    Repeater {
+                        model: root.dockerList.filter(c => !c.running)
+                        delegate: DockerRow {}
+                    }
+                    Text {
+                        visible: root.dockerList.length === 0
+                        text: "no containers"
                         color: root.textFaint
                         font.family: Theme.fontFamily
                         font.pixelSize: 13

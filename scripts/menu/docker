@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/qsmenu"
+source "$SCRIPT_DIR/../src/docker.sh"
+
+docker_start_label="Start Docker"
+docker_stop_label="Stop Docker"
+docker_containers_label="Containers"
+docker_compose_label="Compose projects"
+docker_images_label="Images"
+docker_volumes_label="Volumes"
+docker_networks_label="Networks"
+docker_disk_label="Disk usage / prune"
+
+docker_confirm() {
+    [[ "$(qs_menu "$1" "No\nYes")" == "Yes" ]]
+}
+
+docker_copy_info() {
+    [[ "$1" == *": "* ]] && wl-copy "${1#*: }"
+}
+
+docker_list_name() {
+    printf '%s\n' "${1%%  •*}"
+}
+
+docker_container_menu() {
+    local name="$1"
+    while true; do
+        local info state image_id image project ips ports
+        info="$(docker_container_info "$name")"
+        [[ -z "$info" ]] && { echo "$goback"; return 0; }
+        IFS='|' read -r state image_id image project ips ports <<< "$info"
+
+        local options
+        if [[ "$state" == "running" ]]; then
+            options="Restart\nStop\nLogs\nShell"
+        else
+            options="Start\nLogs\nDelete"
+        fi
+        options="$options\n$divider\nStatus: $state\nImage: $image"
+        [[ -n "$project" ]] && options="$options\nCompose project: $project"
+        ips="${ips//invalid IP/}"
+        [[ -n "${ips// }" ]] && options="$options\nIP: ${ips% }"
+        [[ -n "${ports// }" ]] && options="$options\nPorts: ${ports% }"
+        options="$options\nID: $(docker inspect -f '{{.Id}}' "$name" | cut -c1-12)\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(qs_menu "Container: $name" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            Restart | Stop | Start) docker_try docker "${chosen,,}" "$name" ;;
+            Logs) docker_term "logs: $name" docker logs -f --tail 500 "$name"; echo "$doexit"; return 0 ;;
+            Shell) docker_term "shell: $name" docker exec -it "$name" sh -c 'command -v bash >/dev/null && exec bash || exec sh'; echo "$doexit"; return 0 ;;
+            Delete) docker_confirm "Delete container $name?" && { docker_try docker rm "$name"; echo "$goback"; return 0; } ;;
+            *) docker_copy_info "$chosen" ;;
+        esac
+    done
+}
+
+docker_containers_menu() {
+    local max_lines=24
+    while true; do
+        local list="" name state image
+        while IFS=$'\t' read -r name state image; do
+            [[ -z "$name" ]] && continue
+            list="$list$name  • $state  ($image)\n"
+        done < <(docker_containers)
+        [[ -z "$list" ]] && list="(no containers)\n"
+
+        local chosen
+        chosen="$(qs_menu "Containers" "${list}$divider\n$goback\n$doexit")"
+        case $chosen in
+            "$divider" | "(no containers)") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            *)
+                [[ "$(docker_container_menu "$(docker_list_name "$chosen")")" == "$doexit" ]] && { echo "$doexit"; return 0; }
+                ;;
+        esac
+    done
+}
+
+docker_compose_project_menu() {
+    local name="$1"
+    while true; do
+        local line status files
+        line="$(docker_compose_projects | awk -F'\t' -v n="$name" '$1 == n')"
+        [[ -z "$line" ]] && { echo "$goback"; return 0; }
+        IFS=$'\t' read -r _ status files <<< "$line"
+
+        local options="Start\nStop\nRestart\nLogs\n$divider\nStatus: $status"
+        local f
+        for f in ${files//,/ }; do options="$options\nConfig: $f"; done
+        options="$options\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(qs_menu "Compose: $name" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            Start | Stop | Restart) docker_try docker compose -p "$name" "${chosen,,}" ;;
+            Logs) docker_term "logs: $name" docker compose -p "$name" logs -f --tail 200; echo "$doexit"; return 0 ;;
+            *) docker_copy_info "$chosen" ;;
+        esac
+    done
+}
+
+docker_compose_menu() {
+    while true; do
+        local list="" name status
+        while IFS=$'\t' read -r name status _; do
+            [[ -z "$name" ]] && continue
+            list="$list$name  • $status\n"
+        done < <(docker_compose_projects)
+        [[ -z "$list" ]] && list="(no projects)\n"
+
+        local chosen
+        chosen="$(qs_menu "Compose projects" "${list}$divider\n$goback\n$doexit")"
+        case $chosen in
+            "$divider" | "(no projects)") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            *)
+                [[ "$(docker_compose_project_menu "$(docker_list_name "$chosen")")" == "$doexit" ]] && { echo "$doexit"; return 0; }
+                ;;
+        esac
+    done
+}
+
+docker_image_menu() {
+    local name="$1"
+    while true; do
+        local info
+        info="$(docker image inspect -f '{{.Id}}|{{.Size}}|{{.Created}}' "$name" 2>/dev/null)"
+        [[ -z "$info" ]] && { echo "$goback"; return 0; }
+        local id size created users
+        IFS='|' read -r id size created <<< "$info"
+        users="$(docker ps -a --filter "ancestor=$name" --format '{{.Names}}' | paste -sd, -)"
+
+        local options="Delete\n$divider\nName: $name\nID: $(cut -c8-19 <<< "$id")\nSize: $(numfmt --to=iec "$size")B\nCreated: ${created%%.*}"
+        [[ -n "$users" ]] && options="$options\nUsed by: $users"
+        options="$options\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(qs_menu "Image: $name" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            Delete) docker_confirm "Delete image $name?" && { docker_try docker rmi "$name"; echo "$goback"; return 0; } ;;
+            *) docker_copy_info "$chosen" ;;
+        esac
+    done
+}
+
+docker_images_menu() {
+    local max_lines=24
+    while true; do
+        local list name size created
+        list="$(docker_images_list | while IFS=$'\t' read -r name size created; do
+            printf '%s  • %s, %s\\n' "$name" "$size" "$created"
+        done)"
+        [[ -z "$list" ]] && list="(no images)\n"
+
+        local chosen
+        chosen="$(qs_menu "Images" "${list}$divider\n$goback\n$doexit")"
+        case $chosen in
+            "$divider" | "(no images)") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            *)
+                [[ "$(docker_image_menu "$(docker_list_name "$chosen")")" == "$doexit" ]] && { echo "$doexit"; return 0; }
+                ;;
+        esac
+    done
+}
+
+docker_volume_menu() {
+    local name="$1"
+    while true; do
+        local info
+        info="$(docker volume inspect -f '{{.Driver}}|{{.Mountpoint}}|{{.CreatedAt}}' "$name" 2>/dev/null)"
+        [[ -z "$info" ]] && { echo "$goback"; return 0; }
+        local driver mount created users
+        IFS='|' read -r driver mount created <<< "$info"
+        users="$(docker ps -a --filter "volume=$name" --format '{{.Names}}' | paste -sd, -)"
+
+        local options="Delete\n$divider\nName: $name\nDriver: $driver\nMountpoint: $mount\nCreated: ${created%% *}\nUsed by: ${users:-nothing}\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(qs_menu "Volume: $name" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            Delete) docker_confirm "Delete volume $name and its data?" && { docker_try docker volume rm "$name"; echo "$goback"; return 0; } ;;
+            *) docker_copy_info "$chosen" ;;
+        esac
+    done
+}
+
+docker_volumes_menu() {
+    local max_lines=24
+    while true; do
+        local list="" name driver
+        while IFS=$'\t' read -r name driver; do
+            [[ -z "$name" ]] && continue
+            list="$list$name  • $driver\n"
+        done < <(docker_volumes_list)
+        [[ -z "$list" ]] && list="(no volumes)\n"
+
+        local chosen
+        chosen="$(qs_menu "Volumes" "${list}$divider\n$goback\n$doexit")"
+        case $chosen in
+            "$divider" | "(no volumes)") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            *)
+                [[ "$(docker_volume_menu "$(docker_list_name "$chosen")")" == "$doexit" ]] && { echo "$doexit"; return 0; }
+                ;;
+        esac
+    done
+}
+
+docker_network_menu() {
+    local name="$1"
+    while true; do
+        local info
+        info="$(docker network inspect -f '{{.Driver}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}|{{range .IPAM.Config}}{{.Gateway}} {{end}}|{{range .Containers}}{{.Name}},{{end}}' "$name" 2>/dev/null)"
+        [[ -z "$info" ]] && { echo "$goback"; return 0; }
+        local driver subnet gateway users
+        IFS='|' read -r driver subnet gateway users <<< "$info"
+
+        local options=""
+        [[ "$name" != bridge && "$name" != host && "$name" != none ]] && options="Delete\n$divider\n"
+        options="${options}Name: $name\nDriver: $driver"
+        [[ -n "${subnet// }" ]] && options="$options\nSubnet: ${subnet% }"
+        [[ -n "${gateway// }" ]] && options="$options\nGateway: ${gateway% }"
+        options="$options\nContainers: ${users%,}"
+        [[ -z "$users" ]] && options="${options}none"
+        options="$options\n$divider\n$goback\n$doexit"
+
+        local chosen
+        chosen="$(qs_menu "Network: $name" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            Delete) docker_confirm "Delete network $name?" && { docker_try docker network rm "$name"; echo "$goback"; return 0; } ;;
+            *) docker_copy_info "$chosen" ;;
+        esac
+    done
+}
+
+docker_networks_menu() {
+    local max_lines=24
+    while true; do
+        local list="" name driver
+        while IFS=$'\t' read -r name driver; do
+            [[ -z "$name" ]] && continue
+            list="$list$name  • $driver\n"
+        done < <(docker_networks_list)
+
+        local chosen
+        chosen="$(qs_menu "Networks" "${list}$divider\n$goback\n$doexit")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            *)
+                [[ "$(docker_network_menu "$(docker_list_name "$chosen")")" == "$doexit" ]] && { echo "$doexit"; return 0; }
+                ;;
+        esac
+    done
+}
+
+docker_prune() {
+    local what="$1"; shift
+    docker_confirm "Prune $what?" || return 0
+    (
+        if out=$("$@" 2>&1); then
+            docker_notify "Pruned $what: $(printf '%s\n' "$out" | grep -i 'reclaimed' | tail -1)"
+        else
+            docker_notify "$out"
+        fi
+    ) >/dev/null 2>&1 &
+    disown
+}
+
+docker_disk_menu() {
+    local prune_containers="Prune stopped containers"
+    local prune_dangling="Prune dangling images"
+    local prune_images="Prune all unused images"
+    local prune_cache="Prune build cache"
+    local prune_volumes="Prune unused volumes"
+    while true; do
+        local usage
+        usage="$(docker system df --format '{{.Type}}: {{.Size}}, reclaimable {{.Reclaimable}}')"
+        usage="${usage//$'\n'/\\n}"
+
+        local options="$usage\n$divider\n$prune_containers\n$prune_dangling\n$prune_images\n$prune_cache\n$prune_volumes\n$divider\n$goback\n$doexit"
+        local chosen
+        chosen="$(qs_menu "Disk usage" "$options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            "$prune_containers") docker_prune "stopped containers" docker container prune -f ;;
+            "$prune_dangling") docker_prune "dangling images" docker image prune -f ;;
+            "$prune_images") docker_prune "all unused images" docker image prune -a -f ;;
+            "$prune_cache") docker_prune "build cache" docker builder prune -a -f ;;
+            "$prune_volumes") docker_prune "unused volumes" docker volume prune -a -f ;;
+            *) ;;
+        esac
+    done
+}
+
+docker_menu() {
+    local sub_options="$divider"
+    case $1 in
+        -s | --sub-command) sub_options="$sub_options\n$goback\n$doexit" ;;
+        *) sub_options="$sub_options\n$doexit" ;;
+    esac
+
+    while true; do
+        local options counts=""
+        if docker_service_running; then
+            local running total
+            running=$(docker ps -q | wc -l)
+            total=$(docker ps -aq | wc -l)
+            counts="$docker_containers_label ($running/$total running)"
+            options="$docker_stop_label\n$divider\n$counts\n$docker_compose_label\n$docker_images_label\n$docker_volumes_label\n$docker_networks_label\n$docker_disk_label"
+        else
+            options="$docker_start_label"
+        fi
+
+        local chosen ret=""
+        chosen="$(qs_menu "Docker" "$options\n$sub_options")"
+        case $chosen in
+            "$divider") ;;
+            "$goback") echo "$goback"; return 0 ;;
+            "" | "$doexit") echo "$doexit"; return 0 ;;
+            "$docker_start_label") docker_service_start ;;
+            "$docker_stop_label") docker_confirm "Stop Docker and all containers?" && docker_service_stop ;;
+            "$counts") ret=$(docker_containers_menu) ;;
+            "$docker_compose_label") ret=$(docker_compose_menu) ;;
+            "$docker_images_label") ret=$(docker_images_menu) ;;
+            "$docker_volumes_label") ret=$(docker_volumes_menu) ;;
+            "$docker_networks_label") ret=$(docker_networks_menu) ;;
+            "$docker_disk_label") ret=$(docker_disk_menu) ;;
+        esac
+        [[ "$ret" == "$doexit" ]] && { echo "$doexit"; return 0; }
+    done
+}
