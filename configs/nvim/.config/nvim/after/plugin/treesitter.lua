@@ -1,5 +1,5 @@
 require('nvim-treesitter').install({
-    'c', 'bash', 'go', 'lua', 'vim', 'vimdoc', 'query',
+    'c', 'bash', 'go', 'lua', 'python', 'vim', 'vimdoc', 'query',
     'markdown', 'markdown_inline', 'http', 'diff',
 })
 
