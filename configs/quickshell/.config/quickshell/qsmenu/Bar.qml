@@ -68,7 +68,7 @@ Scope {
     property int calOffset: 0
     readonly property date calShown: new Date(now.getFullYear(), now.getMonth() + calOffset, 1)
 
-    function calendarWeeks(shown, today) {
+    function calendarWeeks(shown, today, dueDays) {
         const y = shown.getFullYear(), m = shown.getMonth();
         const lead = (shown.getDay() + 6) % 7;
         const n = Math.ceil((lead + new Date(y, m + 1, 0).getDate()) / 7);
@@ -80,7 +80,8 @@ Scope {
                 const d = new Date(y, m, 1 - lead + w * 7 + i);
                 const isToday = d.toDateString() === today.toDateString();
                 current = current || isToday;
-                days.push({ t: d.getDate(), out: d.getMonth() !== m, weekend: i >= 5, today: isToday });
+                const key = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+                days.push({ t: d.getDate(), out: d.getMonth() !== m, weekend: i >= 5, today: isToday, due: dueDays[key] || "" });
             }
             weeks.push({ wk: isoWeek(new Date(y, m, 1 - lead + w * 7)), current: current, days: days });
         }
@@ -2250,7 +2251,7 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                         }
 
                         Repeater {
-                            model: root.calendarWeeks(root.calShown, root.now)
+                            model: root.calendarWeeks(root.calShown, root.now, TodoStore.dueDays)
                             delegate: Row {
                                 id: calWeek
                                 required property var modelData
@@ -2280,6 +2281,20 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                                             font.family: Theme.fontFamily
                                             font.pixelSize: 13
                                             font.weight: modelData.today ? Font.Bold : Font.Normal
+                                        }
+                                        Rectangle {
+                                            visible: modelData.due !== ""
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.bottom: parent.bottom
+                                            anchors.bottomMargin: 2
+                                            width: 4
+                                            height: 4
+                                            radius: 2
+                                            opacity: modelData.out ? 0.5 : 1
+                                            color: modelData.today ? "#ffffff"
+                                                : modelData.due === "overdue" ? root.dueLate
+                                                : modelData.due === "today" ? root.dueSoon
+                                                : root.accent
                                         }
                                     }
                                 }

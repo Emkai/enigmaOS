@@ -81,6 +81,20 @@ Singleton {
         return n;
     }
 
+    readonly property var dueDays: {
+        const rank = { later: 1, soon: 2, today: 3, overdue: 4 };
+        const days = {};
+        for (const t of store.tasks) {
+            if (t.done || t.due === "")
+                continue;
+            const key = t.due.slice(0, 10);
+            const tone = store.dueTone(t.due, store.now);
+            if (!days[key] || rank[tone] > rank[days[key]])
+                days[key] = tone;
+        }
+        return days;
+    }
+
     // ---------------- mutations ----------------
 
     // dueInput is anything parseDue accepts; desc is optional multi-line notes.
