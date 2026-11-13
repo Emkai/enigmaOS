@@ -18,7 +18,7 @@ https://www.phoronix.com/rss.php Phoronix
 https://news.ycombinator.com/rss Hacker News
 
 [Security]
-counter = on
+counter = off
 mark_read = off
 clear = off
 https://aws.amazon.com/security/security-bulletins/rss/feed/ AWS Security Bulletins

@@ -32,16 +32,20 @@ Scope {
         hoverKnown = true;
     }
 
-    // Same subsequence matching as Menu.qml's wofi -M fuzzy equivalent.
-    function fuzzyMatch(query, entry) {
+    function fuzzySpan(query, entry) {
         const q = query.toLowerCase();
         const s = entry.toLowerCase();
         let qi = 0;
-        for (let si = 0; si < s.length && qi < q.length; si++) {
-            if (s[si] === q[qi])
+        let start = -1;
+        let si = 0;
+        for (; si < s.length && qi < q.length; si++) {
+            if (s[si] === q[qi]) {
+                if (qi === 0)
+                    start = si;
                 qi++;
+            }
         }
-        return qi === q.length;
+        return qi === q.length ? si - start : -1;
     }
 
     function loadApps() {
@@ -50,7 +54,7 @@ Scope {
             .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
     }
 
-    // Rank: name prefix < name substring < fuzzy over name+comment+keywords.
+    // Rank: name prefix < name substring < fuzzy name < fuzzy name+comment+keywords; fuzzy ties by match span.
     function refilter() {
         const q = searchInput.text.toLowerCase();
         if (q === "") {
@@ -61,17 +65,20 @@ Scope {
                 const a = apps[i];
                 const name = a.name.toLowerCase();
                 let rank;
+                let span = 0;
                 if (name.startsWith(q))
                     rank = 0;
                 else if (name.includes(q))
                     rank = 1;
-                else if (fuzzyMatch(q, a.name + " " + a.comment + " " + a.keywords.join(" ")))
+                else if ((span = fuzzySpan(q, a.name)) >= 0)
                     rank = 2;
+                else if ((span = fuzzySpan(q, a.name + " " + a.comment + " " + a.keywords.join(" "))) >= 0)
+                    rank = 3;
                 else
                     continue;
-                ranked.push({ rank: rank, order: i, app: a });
+                ranked.push({ rank: rank, span: span, order: i, app: a });
             }
-            ranked.sort((x, y) => x.rank - y.rank || x.order - y.order);
+            ranked.sort((x, y) => x.rank - y.rank || x.span - y.span || x.order - y.order);
             filtered = ranked.map(r => r.app);
         }
         selectedIndex = 0;
