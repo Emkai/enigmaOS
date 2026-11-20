@@ -3065,55 +3065,83 @@ done`, "bash", root.nvidiaPoll ? "1" : "0"]
                 }
 
                 Dropdown {
+                    id: dockerDropdown
                     barScreen: barWin.screen
                     hover: hsDocker
                     align: "right"
                     minWidth: 340
+                    Flickable {
+                        id: dockerFlick
+                        x: -8
+                        width: parent.width + 16
+                        implicitWidth: dockerDropdown.naturalWidth(dockerCol)
+                        height: Math.min(contentHeight, dockerDropdown.height - 32)
+                        contentHeight: dockerCol.height
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {
+                            policy: dockerFlick.contentHeight > dockerFlick.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                            width: 4
+                            padding: 0
+                            x: dockerFlick.width - width
+                            background: null
+                            contentItem: Rectangle {
+                                radius: 2
+                                color: parent.pressed ? root.textDim : root.textFaint
+                            }
+                        }
 
-                    Item {
-                        width: parent.width
-                        visible: root.dockerRunning > 0
-                        implicitWidth: runningLbl.implicitWidth + 16 + runningBtns.implicitWidth
-                        implicitHeight: Math.max(runningLbl.implicitHeight, runningBtns.implicitHeight)
-                        SectionLabel { id: runningLbl; text: "RUNNING"; anchors.verticalCenter: parent.verticalCenter }
-                        Row {
-                            id: runningBtns
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 4
-                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "restart all"; textColor: root.textDim; onClicked: root.dockerAction("restart", root.dockerList.filter(c => c.running)) }
-                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "stop all"; textColor: root.textDim; onClicked: root.dockerAction("stop", root.dockerList.filter(c => c.running)) }
+                        Column {
+                            id: dockerCol
+                            x: 8
+                            width: dockerFlick.width - 16
+                            spacing: 6
+                            Item {
+                                width: parent.width
+                                visible: root.dockerRunning > 0
+                                implicitWidth: runningLbl.implicitWidth + 16 + runningBtns.implicitWidth
+                                implicitHeight: Math.max(runningLbl.implicitHeight, runningBtns.implicitHeight)
+                                SectionLabel { id: runningLbl; text: "RUNNING"; anchors.verticalCenter: parent.verticalCenter }
+                                Row {
+                                    id: runningBtns
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 4
+                                    TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "restart all"; textColor: root.textDim; onClicked: root.dockerAction("restart", root.dockerList.filter(c => c.running)) }
+                                    TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "stop all"; textColor: root.textDim; onClicked: root.dockerAction("stop", root.dockerList.filter(c => c.running)) }
+                                }
+                            }
+                            Repeater {
+                                model: root.dockerList.filter(c => c.running)
+                                delegate: DockerRow {}
+                            }
+                            Divider { visible: root.dockerRunning > 0 && root.dockerRunning < root.dockerList.length }
+                            Item {
+                                width: parent.width
+                                visible: root.dockerRunning < root.dockerList.length
+                                implicitWidth: stoppedLbl.implicitWidth + 16 + stoppedBtns.implicitWidth
+                                implicitHeight: Math.max(stoppedLbl.implicitHeight, stoppedBtns.implicitHeight)
+                                SectionLabel { id: stoppedLbl; text: "STOPPED"; anchors.verticalCenter: parent.verticalCenter }
+                                Row {
+                                    id: stoppedBtns
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 4
+                                    TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "start all"; textColor: root.textDim; onClicked: root.dockerAction("start", root.dockerList.filter(c => !c.running)) }
+                                }
+                            }
+                            Repeater {
+                                model: root.dockerList.filter(c => !c.running)
+                                delegate: DockerRow {}
+                            }
+                            Text {
+                                visible: root.dockerList.length === 0
+                                text: "no containers"
+                                color: root.textFaint
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 13
+                            }
                         }
-                    }
-                    Repeater {
-                        model: root.dockerList.filter(c => c.running)
-                        delegate: DockerRow {}
-                    }
-                    Divider { visible: root.dockerRunning > 0 && root.dockerRunning < root.dockerList.length }
-                    Item {
-                        width: parent.width
-                        visible: root.dockerRunning < root.dockerList.length
-                        implicitWidth: stoppedLbl.implicitWidth + 16 + stoppedBtns.implicitWidth
-                        implicitHeight: Math.max(stoppedLbl.implicitHeight, stoppedBtns.implicitHeight)
-                        SectionLabel { id: stoppedLbl; text: "STOPPED"; anchors.verticalCenter: parent.verticalCenter }
-                        Row {
-                            id: stoppedBtns
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 4
-                            TextButton { discrete: true; implicitHeight: 24; icon: ""; label: "start all"; textColor: root.textDim; onClicked: root.dockerAction("start", root.dockerList.filter(c => !c.running)) }
-                        }
-                    }
-                    Repeater {
-                        model: root.dockerList.filter(c => !c.running)
-                        delegate: DockerRow {}
-                    }
-                    Text {
-                        visible: root.dockerList.length === 0
-                        text: "no containers"
-                        color: root.textFaint
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 13
                     }
                 }
 

@@ -150,7 +150,7 @@ vim.keymap.set("n", "<F8>", function()
 	dap.step_out()
 end, { desc = "Debugger step out" })
 
--- Echandia (bms/escu/sil) scripts — only the commands that apply to the detected
+-- Echandia (bms/escu/sil/bcu) scripts — only the commands that apply to the detected
 -- repo are bound (see echandia.keymaps). Nothing is bound outside those repos.
 local echandia = require("emkai.echandia")
 local echandia_repo = echandia.detect_repo()

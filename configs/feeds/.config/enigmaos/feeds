@@ -9,6 +9,8 @@ https://archlinux.org/feeds/news/ Arch Linux News
 https://lwn.net/headlines/rss LWN.net
 https://github.com/hyprwm/Hyprland/releases.atom Hyprland releases
 https://security.archlinux.org/advisory/feed.atom Arch Linux Security
+https://github.com/quickshell-mirror/quickshell/commits/master.atom Quickshell
+https://www.kernel.org/feeds/kdist.xml Kernal Release
 
 [news]
 counter = off
@@ -27,4 +29,3 @@ https://cert.europa.eu/publications/security-advisories-rss CERT-EU
 https://www.cert.se/feed.rss CERT-SE
 https://www.cisa.gov/cybersecurity-advisories/all.xml CISA (US)
 https://isc.sans.edu/rssfeed.xml SANS Internet Storm Center
-https://ubuntu.com/security/notices/rss.xml Ubuntu Security Notices

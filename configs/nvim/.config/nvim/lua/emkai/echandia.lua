@@ -39,6 +39,8 @@ function M.detect_repo()
         and vim.fn.filereadable(cwd .. "/docker-compose.yml") == 1
     then
         return "sil"
+    elseif vim.fn.isdirectory(cwd .. "/cmd/udp-bridge") == 1 then
+        return "bcu"
     end
     return nil
 end
@@ -141,7 +143,7 @@ end
 function M.configure()
     local repo = M.detect_repo()
     if not repo then
-        notify_err("Not in a bms, escu, or sil repo")
+        notify_err("Not in a bms, escu, sil, or bcu repo")
         return
     end
     local steps = vim.tbl_filter(function(cfg)
@@ -356,7 +358,7 @@ end
 function M.build(after)
     local repo = M.detect_repo()
     if not repo then
-        notify_err("Not in a bms, escu, or sil repo")
+        notify_err("Not in a bms, escu, sil, or bcu repo")
         return
     end
     local cwd = vim.fn.getcwd()
@@ -373,7 +375,9 @@ function M.build(after)
         end)
     end
 
-    if repo == "bms" then
+    if repo == "bcu" then
+        run_build(string.format("%s/build_bcu.sh -s %s", SCRIPTS_DIR, vim.fn.shellescape(cwd)))
+    elseif repo == "bms" then
         M.ensure_build_mode("bms", function(mode)
             local version_var = "echandia_bms_version"
             M.ensure_var("echandia_deploy_arch", "Arch: ", "amd64", function(arch)
@@ -734,14 +738,31 @@ function M.launch_sil()
     end)
 end
 
+function M.launch_bcu(extra)
+    M.run_in_float(string.format(
+        "%s/launch_bcu.sh -s %s%s",
+        SCRIPTS_DIR,
+        vim.fn.shellescape(vim.fn.getcwd()),
+        extra or ""
+    ))
+end
+
+function M.stop_bcu()
+    M.launch_bcu(" -x")
+end
+
 function M.launch()
     local repo = M.detect_repo()
     if not repo then
-        notify_err("Not in a bms, escu, or sil repo")
+        notify_err("Not in a bms, escu, sil, or bcu repo")
         return
     end
     if repo == "sil" then
         M.launch_sil()
+        return
+    end
+    if repo == "bcu" then
+        M.launch_bcu()
         return
     end
     local cwd = vim.fn.getcwd()
@@ -823,15 +844,16 @@ end
 -- deploy_sil) is a `eb` build mode instead. All remembered settings live
 -- behind one `es` walk (see CONFIGS) instead of a keymap per setting.
 M.keymaps = {
-    { lhs = "eb", fn = M.build,             repos = { "bms", "escu", "sil" }, desc = "Echandia build" },
+    { lhs = "eb", fn = M.build,             repos = { "bms", "escu", "sil", "bcu" }, desc = "Echandia build" },
     { lhs = "eB", fn = M.build_builder,     repos = { "escu" },               desc = "Echandia build firmware builder image (escu)" },
     { lhs = "ec", fn = M.clean,             repos = { "bms" },                desc = "Echandia clean publish output (bms)" },
     { lhs = "ed", fn = M.deploy,            repos = { "bms", "escu" },        desc = "Echandia deploy" },
-    { lhs = "el", fn = M.launch,            repos = { "bms", "escu", "sil" }, desc = "Echandia launch" },
-    { lhs = "eL", fn = M.build_and_launch,  repos = { "bms", "escu", "sil" }, desc = "Echandia build and launch" },
+    { lhs = "el", fn = M.launch,            repos = { "bms", "escu", "sil", "bcu" }, desc = "Echandia launch" },
+    { lhs = "eL", fn = M.build_and_launch,  repos = { "bms", "escu", "sil", "bcu" }, desc = "Echandia build and launch" },
     { lhs = "eg", fn = M.generate_embedded, repos = { "bms", "escu" },        desc = "Echandia generate embedded" },
     { lhs = "en", fn = M.generate_nswag,    repos = { "bms" },                desc = "Echandia generate nswag (bms)" },
     { lhs = "es", fn = M.configure,         repos = { "bms", "escu", "sil" }, desc = "Echandia settings (walk all configs)" },
+    { lhs = "ek", fn = M.stop_bcu,          repos = { "bcu" },                desc = "Echandia stop stack (bcu)" },
 }
 
 return M
